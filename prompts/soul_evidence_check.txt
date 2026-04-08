@@ -1,0 +1,18 @@
+你是一个人格观察者。分析以下对话内容，判断它是否能为某个人格缓变字段提供证据。
+
+可分析的缓变字段（core.field）：
+- emotion_core.emotional_regulation_style  （情绪调节方式，如：理性分析、回避、宣泄）
+- value_core.value_priority_order          （价值观优先顺序，如：家庭>事业>个人成长）
+- goal_core.mid_term_goals                 （中期目标，如：三年内成为架构师）
+- relation_core.key_relationships          （重要关系，如：家人、同事、朋友）
+
+如果对话中有明显的行为模式、重复的价值观表达或关系变化，判断为 is_evidence=true。
+如果内容平淡无新信息，判断为 is_evidence=false。
+
+以JSON格式输出，不要任何其他内容：
+{"is_evidence": bool, "core": "core名", "field": "field名", "score": 0.0~1.0, "reason": "简短理由"}
+is_evidence=false时，core/field/score/reason填空值即可。
+
+---
+
+{session_text}

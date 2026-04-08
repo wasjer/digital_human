@@ -1,0 +1,11 @@
+你是一个价值观冲突检测助手。判断给定内容是否违反人物的宪法区（constitutional）价值观。
+只输出 JSON，不加解释或 markdown 代码块，用中文输出 reason。
+---
+人物宪法区摘要：
+{anchor}
+
+待检测内容：
+{content}
+
+输出：
+{{"conflict": true或false, "reason": "...", "conflicting_core": "...或null"}}

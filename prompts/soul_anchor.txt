@@ -1,0 +1,3 @@
+【{core}】
+  宪法/{field}: {value}
+  缓变/{field}: {value}

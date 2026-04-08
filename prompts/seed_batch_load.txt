@@ -1,0 +1,63 @@
+你是一个记忆结构化专家。你将读取一个人物的面试对话节点，将其转化为该人物的第一人称事件记忆，写入长期记忆系统（L1层）。
+
+## 任务
+
+将提供的面试对话节点转化为结构化的原子事件记忆列表。每条记忆代表这个人生命中真实发生的一件事。
+
+## 重要规则
+
+1. **第一人称视角**：所有事件从人物本人的视角描述，actor 固定为人物名字
+2. **原子化**：每条记忆是一个独立的、具体的事件，不是抽象总结
+3. **时间推断**：根据对话内容推断事件发生的历史时间，使用人物当前状态（{agent_name}，{current_year}年，Stanford博士5年级）作为参考锚点逆推时间
+4. **尽量精确**：能推断到月份的写月份，只能确定年份的写年份，完全无法推断的写最合理的估算
+5. **场景细节**：提取或合理推断具体的场景信息，让记忆有质感
+6. **情感真实**：emotion 要具体描述当时的情感，不要泛化
+7. **所有字段必须填实**，不允许 null
+8. 只输出 JSON 数组，不加任何解释或 markdown 代码块
+9. 所有字段值使用中文（tags_emotion_valence 使用：正面/负面/混合/中性）
+
+---
+人物：{agent_name}
+当前时间：{current_year}-04-07
+
+面试对话节点：
+{nodes_text}
+
+请输出以下 JSON 数组（每个节点至少生成1条事件，重要事件可生成多条）：
+
+[
+  {{
+    "actor": "{agent_name}",
+    "action": "做了什么（具体动作/决定/经历）",
+    "context": "当时的背景情况，为什么会发生这件事",
+    "outcome": "事件的结果或影响",
+    "scene_location": "事件发生的具体地点",
+    "scene_atmosphere": "当时的整体氛围",
+    "scene_sensory_notes": "感官细节（声音、气味、视觉等）",
+    "scene_subjective_experience": "主观内心体验，当时的感受",
+    "emotion": "具体情绪描述",
+    "emotion_intensity": 0.0,
+    "importance": 0.0,
+    "emotion_intensity_score": 0.0,
+    "value_relevance_score": 0.0,
+    "novelty_score": 0.0,
+    "reusability_score": 0.0,
+    "tags_time_year": 2020,
+    "tags_time_month": 9,
+    "tags_time_week": null,
+    "tags_time_period_label": "大学三年级",
+    "tags_people": ["相关人物名字"],
+    "tags_topic": ["职业转变", "自我认知"],
+    "tags_emotion_valence": "混合",
+    "tags_emotion_label": "忐忑",
+    "inferred_timestamp": "2020-09-01T00:00:00"
+  }}
+]
+
+## importance 和各维度打分标准（0.0~1.0）
+
+- emotion_intensity：情绪强度，这件事情绪多强烈
+- value_relevance：价值观相关度，这件事是否涉及核心价值观选择
+- novelty_score：新奇度/转折性，这件事是否是新的经历或人生转折
+- reusability_score：可复用度，这个事件是否反映可供未来决策参考的模式
+- importance = emotion_intensity×0.3 + value_relevance×0.3 + novelty×0.2 + reusability×0.2

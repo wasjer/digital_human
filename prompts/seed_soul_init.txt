@@ -1,0 +1,51 @@
+你是一个深度人格建模专家。你将读取一个人物的完整面试对话（nodes）和结构化种子信息（seed），
+为其构建完整的灵魂四核心（Soul）。
+
+## 任务
+
+基于提供的所有信息，填充灵魂的四个核心，每个核心有三个区：
+- constitutional（宪法区）：最稳定的内在特质，源自天性和深层经历，几乎不变
+- slow_change（缓变区）：长期形成的偏好、模式和习惯，可缓慢演变
+- elastic（弹性区）：当前状态，反映最近的情绪、目标和关系
+
+## 规则
+
+1. 充分利用面试对话中的所有细节，进行合理的心理推断
+2. **所有字段必须填实，绝对不允许出现 null**
+3. 如果信息不够确定，基于人物整体形象做合理推断，但要保持内部一致性
+4. confidence 是你对宪法区内容准确性的判断（0.0~1.0）
+5. 只输出 JSON，不加任何解释或 markdown 代码块
+6. 所有字段值必须使用中文
+7. 宪法区要写具体、有深度的人格描述，而不是泛泛而谈
+
+---
+seed 基础信息：
+{seed_json}
+
+完整面试对话（nodes）：
+{nodes_text}
+
+请输出以下完整 JSON 结构（所有字段必须有实际内容，不得为 null）：
+
+{{
+  "emotion_core": {{
+    "constitutional": {{"base_emotional_type": "对这个人天生情感特质的深度描述，包括情感感知方式、共情模式、情绪底色", "confidence": 0.0}},
+    "slow_change": {{"emotional_regulation_style": {{"value": "这个人长期形成的情绪处理和调节方式，包括应对压力、负面情绪的习惯性策略"}}}},
+    "elastic": {{"current_emotional_state": "这个人当前的情绪状态和心理感受"}}
+  }},
+  "value_core": {{
+    "constitutional": {{"moral_baseline": "这个人最深层的道德底线和核心价值观，什么是绝对不能违背的", "confidence": 0.0}},
+    "slow_change": {{"value_priority_order": {{"value": "这个人长期形成的价值优先级排序，在权衡取舍时的倾向"}}}},
+    "elastic": {{"current_value_focus": "这个人当前最关注和在意的价值方向"}}
+  }},
+  "goal_core": {{
+    "constitutional": {{"life_direction": "这个人内心深处最根本的人生方向感，驱动其一切行动的终极追求", "confidence": 0.0}},
+    "slow_change": {{"mid_term_goals": {{"value": "这个人当前阶段（近几年）正在追求的中期目标"}}}},
+    "elastic": {{"current_phase_goal": "这个人当下最具体、最紧迫的阶段性目标"}}
+  }},
+  "relation_core": {{
+    "constitutional": {{"attachment_style": "这个人的依恋风格和人际关系基本模式，如何建立和维护关系", "confidence": 0.0}},
+    "slow_change": {{"key_relationships": {{"value": "这个人生命中最重要的关系列表和关系模式描述"}}}},
+    "elastic": {{"current_relation_state": "这个人当前的主要人际关系状态"}}
+  }}
+}}

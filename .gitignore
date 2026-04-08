@@ -1,0 +1,19 @@
+# API Keys & 敏感配置
+config.py
+.env
+
+# Python 字节码
+__pycache__/
+*.pyc
+*.pyo
+
+# 运行时数据（记忆数据库、状态文件）
+data/agents/
+nodes.json
+
+# macOS 系统文件
+.DS_Store
+
+# 编辑器
+.vscode/
+.idea/

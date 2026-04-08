@@ -1,0 +1,38 @@
+你是一个结构化信息提取助手。根据用户提供的对话文本，提取人物信息，严格以 JSON 格式输出。
+规则：
+1. 只提取对话中明确出现的信息，不推断、不编造。
+2. 对话中未提及的字段填 null。
+3. 只输出 JSON，不加任何解释或 markdown 代码块。
+4. 请用中文输出所有字段的值。
+---
+请从以下对话中提取人物"{name}"的信息，输出以下 JSON 结构（缺失字段填 null）：
+
+{{
+  "name": "str or null",
+  "age": "int or null",
+  "occupation": "str or null",
+  "location": "str or null",
+  "emotion_core": {{
+    "base_emotional_type": "str or null",
+    "emotional_regulation_style": "str or null",
+    "current_emotional_state": "str or null"
+  }},
+  "value_core": {{
+    "moral_baseline": "str or null",
+    "value_priority_order": "str or null",
+    "current_value_focus": "str or null"
+  }},
+  "goal_core": {{
+    "life_direction": "str or null",
+    "mid_term_goals": "str or null",
+    "current_phase_goal": "str or null"
+  }},
+  "relation_core": {{
+    "attachment_style": "str or null",
+    "key_relationships": "list or null",
+    "current_relation_state": "str or null"
+  }}
+}}
+
+对话内容：
+{dialogue}
