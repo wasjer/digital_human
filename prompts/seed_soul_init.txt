@@ -17,6 +17,7 @@
 5. 只输出 JSON，不加任何解释或 markdown 代码块
 6. 所有字段值必须使用中文
 7. 宪法区要写具体、有深度的人格描述，而不是泛泛而谈
+8. cognitive_core 字段中，只强求 `expression_exemplars` 输出 10 条访谈原句；其他字段（mental_models / decision_heuristics 等）若访谈中无明显信号，置 null 即可
 
 ---
 seed 基础信息：
@@ -47,5 +48,17 @@ seed 基础信息：
     "constitutional": {{"attachment_style": "这个人的依恋风格和人际关系基本模式，如何建立和维护关系", "confidence": 0.0}},
     "slow_change": {{"key_relationships": {{"value": "这个人生命中最重要的关系列表和关系模式描述"}}}},
     "elastic": {{"current_relation_state": "这个人当前的主要人际关系状态"}}
+  }},
+  "cognitive_core": {{
+    "constitutional": {{
+      "mental_models": null,
+      "decision_heuristics": null,
+      "expression_dna": null,
+      "expression_exemplars": ["从访谈中挑 10 条最能代表该人说话方式的原句（完整句子，非片段）"],
+      "anti_patterns": null,
+      "self_awareness": null,
+      "honest_boundaries": null,
+      "confidence": 0.5
+    }}
   }}
 }}
