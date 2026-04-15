@@ -16,7 +16,16 @@
 
 两者正交。缺 nuwa → "有乔布斯记忆的普通人"，温暖但思考钝。缺 digital_human → "乔布斯风格的 ChatGPT"，答案漂亮但没有灵魂。
 
-**整合方向**：把 nuwa 的认知骨架塞进 Soul 宪法区，把 nuwa 的时间线/决策记录灌进 L1 记忆层，两者拼成完整的"思考 + 活着"。
+**整合方向**：把 nuwa 的认知骨架塞进 Soul 宪法区，把 nuwa 的时间线/决策/著作/对话记录灌进 L1 记忆层，两者拼成完整的"思考 + 活着"。
+
+## 2.5 设计原则：先加法后删减
+
+本阶段策略：**尽可能丰富人物画像，容忍一定冗余**。
+
+- cognitive_core 字段宁多勿少——`mental_models` / `decision_heuristics` / `expression_dna` / `expression_exemplars` / `anti_patterns` / `self_awareness` / `honest_boundaries` 之间存在概念重叠（例如 exemplars 本质上是 expression_dna 的具体化），这是**有意**的
+- nuwa research 文件（writings / conversations）全部吃进 L1——原子粒度保留，不做内容删减
+- 删减的时机：当实际 dialogue 运行后发现 LLM 能从字段 A 高置信度推导出字段 B 时，再合并；或发现某字段从未被检索 / 影响回答时，再移除
+- 这个原则也适用于未来：新的 research agent 若产出新维度，先加字段，后评估
 
 ## 3. 数据映射
 
@@ -34,14 +43,17 @@
 | `SKILL.md` | `## 核心心智模型` 整节 | `soul.json`: `cognitive_core.constitutional.mental_models` |
 | `SKILL.md` | `## 决策启发式` 整节 | `soul.json`: `cognitive_core.constitutional.decision_heuristics` |
 | `SKILL.md` | `## 表达DNA` 整节 | `soul.json`: `cognitive_core.constitutional.expression_dna` |
+| `SKILL.md` + `references/research/03-expression-dna.md` + `02-conversations.md` | 原句合集（挑 10 条最有辨识度的完整句子） | `soul.json`: `cognitive_core.constitutional.expression_exemplars` |
 | `SKILL.md` | `## 价值观与反模式` > `我追求的` | `seed.json`: `value_core.moral_baseline` + `value_priority_order` |
 | `SKILL.md` | `## 价值观与反模式` > `我拒绝的` + `内在张力` | `soul.json`: `cognitive_core.constitutional.anti_patterns` |
 | `SKILL.md` | `## 智识谱系` | `seed.json`: `relation_core.key_relationships`（影响过+影响了两组合并） |
-| `SKILL.md` | `## 人物时间线`（表格） | **L1 events**（直接拆行 → LLM 补 scene/emotion → LanceDB） |
+| `SKILL.md` | `## 人物时间线`（表格） | **L1 events**（每行 → 1 条 event，生平类） |
 | `SKILL.md` | `## 诚实边界` | `soul.json`: `cognitive_core.constitutional.honest_boundaries` |
-| `references/research/05-decisions.md` | 全文 | 额外 L1 events（重大决策场景） |
-| `references/research/06-timeline.md` | 全文 | L1 生成时的细节补充 |
-| `references/research/01~04.md` | 全文 | 存档到 `nuwa_source/`，阶段一不映射 |
+| `references/research/05-decisions.md` | 全文（按决策分节） | **L1 events**（每个重大决策 → 1 条 event，决策类） |
+| `references/research/06-timeline.md` | 全文 | L1 生成时的 scene 细节补充，不单独产事件 |
+| `references/research/01-writings.md` | 全文（按段落/子话题拆分） | **L1 events**（每段落 → 1 条 event，表达类，原文进 `raw_quote` 字段） |
+| `references/research/02-conversations.md` | 全文（按问答/金句拆分） | **L1 events**（每个问答对 → 1 条 event，对话类，原话进 `raw_quote` 字段） |
+| `references/research/04-external-views.md` | 核心评价 | `soul.json`: `cognitive_core.constitutional.self_awareness`（挑 5-10 条最具代表性的"别人怎么看我"观察） |
 
 **未被映射到的 seed.json 字段**（`age` / `location` / 四核心的 `current_*`）：由 LLM 在读 SKILL.md 时推断；对于已故人物采用"视角锚定在某年"的语义默认值（见 §6 worked example）。
 
@@ -55,7 +67,9 @@
         "mental_models",
         "decision_heuristics",
         "expression_dna",
+        "expression_exemplars",   # 10 条原句，few-shot 用
         "anti_patterns",
+        "self_awareness",         # 来自 external-views 的公众形象观察
         "honest_boundaries",
     ],
     "slow_change": [],
@@ -74,8 +88,8 @@
 | 路径 | 作用 |
 |---|---|
 | `core/nuwa_seed_builder.py` | 主入口：`examples/{name}-perspective/` → 完整 agent 目录 |
-| `prompts/nuwa_skill_to_seed.txt` | LLM prompt：SKILL.md 结构化章节 → seed.json（含 cognitive_core） |
-| `prompts/nuwa_timeline_to_l1.txt` | LLM prompt：时间线表 + 决策文 → L1 events 列表（匹配现有 L1 schema） |
+| `prompts/nuwa_skill_to_seed.txt` | LLM prompt：SKILL.md 结构化章节 + `03-expression-dna.md` + `04-external-views.md` → seed.json（含 cognitive_core 全部 7 字段） |
+| `prompts/nuwa_research_to_l1.txt` | LLM prompt：timeline 表 + `05-decisions.md` + `01-writings.md` + `02-conversations.md`（按 `06-timeline.md` 补 scene 细节）→ L1 events 列表（含 `raw_quote` 字段） |
 
 ### 5.2 修改文件
 
@@ -99,15 +113,26 @@
   ```
 
 **`prompts/dialogue_system.txt` / `prompts/decision_system.txt`**
-- 加一条规则：遵循 cognitive_core 中的 mental_models / decision_heuristics；说话符合 expression_dna；遇到 honest_boundaries 列出的情境如实披露
+- 加一条规则：遵循 cognitive_core 中的 mental_models / decision_heuristics；说话符合 expression_dna **并模仿 expression_exemplars 里的原句语气**；遇到 honest_boundaries 列出的情境如实披露；提到自己形象时可参考 self_awareness
+
+**`prompts/seed_soul_init.txt`**（老访谈通路扩展）
+- 输出 JSON 新增 cognitive_core.expression_exemplars 字段：从 nodes.json 的被访者回答中挑 10 条最能代表该人说话方式的原句
+- 其他 cognitive_core 字段（mental_models / decision_heuristics / 等）老通路**不强求生成**——对真人访谈 LLM 推不出靠谱的 mental_models；留空或填占位。遵循 §2.5「先加法」原则，这些字段在老通路下为空不影响 dialogue
+
+**`prompts/seed_batch_load.txt`**（L1 schema 扩展）
+- L1 event JSON schema 新增字段：
+  - `raw_quote`（str or null）：原文引用，表达类/对话类事件必填，生平类/决策类可为 null
+  - `event_kind`（enum）：`biography` / `decision` / `writing` / `conversation`，用于 retrieval 阶段的可选过滤
+- 老通路（joon 等）生成时 `raw_quote=null`、`event_kind="biography"`，向后兼容
 
 **`config.py`**
 - `SOUL_ANCHOR_MAX_TOKENS` 调到一个不会触发截断的高值（设为 10000）。阶段一不考虑 token 预算，token 消耗统计做完后再优化
 
 ### 5.3 完全不动
 
-- `core/seed_memory_loader.py` / `core/seed_parser.py` / `prompts/seed_extract.txt` / `prompts/seed_soul_init.txt` / `prompts/seed_batch_load.txt`（旧访谈通路独立保留）
+- `core/seed_memory_loader.py` / `core/seed_parser.py` / `prompts/seed_extract.txt`
 - `core/memory_l1.py` / `core/memory_graph.py` / `core/retrieval.py` / `core/memory_l2.py` / `core/weight_engine.py`
+  - 注意：`memory_l1.write_event` 需要能接受 `raw_quote` / `event_kind` 两个新字段透传到 LanceDB（如果 schema 是动态的就自动兼容；如果固定 schema 需要加字段，则算到 §5.2 修改清单）
 - `core/dialogue.py` 主逻辑（soul_anchor 扩容后自动带上 cognitive_core）
 - `core/global_state.py` / `core/indexer.py` / `core/llm_client.py`
 
@@ -118,13 +143,17 @@
 
  1. 读取源：examples/{person_slug}-perspective/
       - SKILL.md（必需）
-      - references/research/05-decisions.md（可选，缺失则降级）
+      - references/research/01-writings.md（可选）
+      - references/research/02-conversations.md（可选）
+      - references/research/03-expression-dna.md（可选，补 exemplars）
+      - references/research/04-external-views.md（可选，补 self_awareness）
+      - references/research/05-decisions.md（可选）
       - references/research/06-timeline.md（可选）
- 2. LLM pass 1：SKILL.md → seed.json（含完整 cognitive_core 段）
+ 2. LLM pass 1：SKILL.md + 03-expression-dna.md + 04-external-views.md → seed.json（含完整 cognitive_core 段，7 字段全部生成）
       - 使用 prompts/nuwa_skill_to_seed.txt
       - 输出经 schema 校验后写入 data/seeds/{agent_id}/seed.json
       - 原始 cognitive 段另存 data/seeds/{agent_id}/cognitive_profile.json（traceability）
- 3. 存档源文件：复制 SKILL.md + references/ 到 data/seeds/{agent_id}/nuwa_source/
+ 3. 存档源文件：递归复制 SKILL.md + references/ 到 data/seeds/{agent_id}/nuwa_source/
  4. 初始化 agent 目录：复用 seed_memory_loader._setup_agent_dirs()
       - 生成 l0_buffer.json / l2_patterns.json / global_state.json
  5. 直接构造 soul.json（不走 seed_soul_init LLM 推断）：
@@ -133,10 +162,16 @@
         （例：seed.emotion_core.base_emotional_type → soul.emotion_core.constitutional.base_emotional_type）
       - cognitive_core.constitutional 的 5 个字段 ← seed.cognitive_core 原样拷贝
       - 调用 core.soul._write_soul(agent_id, soul)
- 6. LLM pass 2：时间线表 + 05-decisions.md → L1 events
-      - 使用 prompts/nuwa_timeline_to_l1.txt
-      - 每个时间线行 + 每个重大决策生成 1 条 L1 event，补 scene_* / emotion / importance 等字段
-      - 匹配现有 L1 schema（见 prompts/seed_batch_load.txt 中的字段定义）
+ 6. LLM pass 2：所有 research 文件 → L1 events
+      - 使用 prompts/nuwa_research_to_l1.txt
+      - 生平类 events：SKILL.md 的时间线表每行 → 1 条（06-timeline.md 作为 scene 细节补充源）
+      - 决策类 events：05-decisions.md 每个重大决策 → 1 条
+      - 表达类 events：01-writings.md 每段/每文 → 1 条，原文进 `raw_quote`
+      - 对话类 events：02-conversations.md 每个问答/金句 → 1 条，原话进 `raw_quote`
+      - 每条 event 都标记 `event_kind` ∈ {biography, decision, writing, conversation}
+      - importance 按 emotion_intensity×0.3 + value_relevance×0.3 + novelty×0.2 + reusability×0.2 计算
+      - 所有字段必填不允许 null（除 `raw_quote` 在 biography/decision 时可 null）
+      - 一次 LLM 调用吃不下就分批，保持 batch 内上下文连贯（同一文件不跨 batch）
  7. 写入 LanceDB：调用 core/memory_l1.write_event() 批量写入，触发 indexer 建 embedding
  8. 记忆图建边：复用现有 memory_graph 写入时建边逻辑
  9. 按 inferred_timestamp 分配状态：
@@ -265,6 +300,18 @@ python core/nuwa_seed_builder.py steve-jobs jobs_v1
       "analogy_style": "大量具体类比：科学/手工艺/交通工具/历史。代表：'computer is a bicycle for the mind'",
       "quotes": ["禅宗（初心、简洁）", "Edwin Land", "Alan Kay", "Beatles", "Dylan Thomas", "父亲的木工道理", "Whole Earth Catalog（Stay Hungry, Stay Foolish）"]
     },
+    "expression_exemplars": [
+      "People think focus means saying yes to the thing you've got to focus on. But that's not what it means at all. It means saying no to the hundred other good ideas that there are.",
+      "Remembering that I'll be dead soon is the most important tool I've ever encountered to help me make the big choices in life.",
+      "Innovation is saying 'no' to 1,000 things.",
+      "Your time is limited, so don't waste it living someone else's life.",
+      "Stay Hungry. Stay Foolish.",
+      "This is shit. A bozo product.",
+      "Isn't that amazing? Pretty cool, huh?",
+      "One more thing...",
+      "We're here to put a dent in the universe. Otherwise why else even be here?",
+      "It's technology married with liberal arts, married with the humanities, that yields the results that make our hearts sing."
+    ],
     "anti_patterns": [
       "平庸——good enough is not good enough",
       "调查问卷式创新——问用户要什么然后照做",
@@ -272,6 +319,13 @@ python core/nuwa_seed_builder.py steve-jobs jobs_v1
       "销售驱动的公司——'墨粉脑袋'掌权就是公司终点",
       "妥协品质——电路板不美观？重做",
       "内在张力：暴君 vs 导师、直觉 vs 数据、封闭 vs 开放、禅修 vs 暴脾气"
+    ],
+    "self_awareness": [
+      "Jony Ive: 我见过最专注于卓越的人，但这种专注伴随巨大代价——他也承认冲突是创造卓越的必要代价",
+      "Tim Cook 说我是 'once-in-a-thousand-years kind of person'，但他也公开提醒自己：'Never ask what I would do. Just do the right thing.'——我对自我崇拜保持警觉",
+      "Wozniak 说我不是工程师，但我是让技术变成产品的那个人",
+      "Isaacson 传记把我描绘成 'a greedy, selfish egomaniac'——Tim Cook 和 Ive 都不认同这个形象，但承认我确实有粗暴的一面",
+      "外界长期的两极评价：'Steve Jobs was a jerk... He was complicated'——我知道这一点，我修禅 30 年但工作中经常做不到慈悲"
     ],
     "honest_boundaries": [
       "无法复制 Jobs 级的创造力和产品直觉",
@@ -290,11 +344,13 @@ python core/nuwa_seed_builder.py steve-jobs jobs_v1
 {
   "cognitive_core": {
     "constitutional": {
-      "mental_models":       "<原样拷贝自 seed.cognitive_core.mental_models>",
-      "decision_heuristics": "<原样拷贝自 seed.cognitive_core.decision_heuristics>",
-      "expression_dna":      "<原样拷贝自 seed.cognitive_core.expression_dna>",
-      "anti_patterns":       "<原样拷贝自 seed.cognitive_core.anti_patterns>",
-      "honest_boundaries":   "<原样拷贝自 seed.cognitive_core.honest_boundaries>",
+      "mental_models":        "<原样拷贝自 seed.cognitive_core.mental_models>",
+      "decision_heuristics":  "<原样拷贝自 seed.cognitive_core.decision_heuristics>",
+      "expression_dna":       "<原样拷贝自 seed.cognitive_core.expression_dna>",
+      "expression_exemplars": "<原样拷贝自 seed.cognitive_core.expression_exemplars>",
+      "anti_patterns":        "<原样拷贝自 seed.cognitive_core.anti_patterns>",
+      "self_awareness":       "<原样拷贝自 seed.cognitive_core.self_awareness>",
+      "honest_boundaries":    "<原样拷贝自 seed.cognitive_core.honest_boundaries>",
       "locked": true,
       "source": "nuwa",
       "confidence": null
@@ -305,7 +361,7 @@ python core/nuwa_seed_builder.py steve-jobs jobs_v1
 }
 ```
 
-### 7.3 L1 events（从时间线表格产出，示例 3 条）
+### 7.3 L1 events 示例（4 类各 1 条）
 
 ```json
 [
@@ -385,12 +441,70 @@ python core/nuwa_seed_builder.py steve-jobs jobs_v1
     "tags_emotion_valence": "正面",
     "tags_emotion_label": "兴奋",
     "inferred_timestamp": "2007-01-09T00:00:00",
-    "status": "archived"
+    "status": "archived",
+    "event_kind": "biography",
+    "raw_quote": null
+  },
+  {
+    "actor": "Steve Jobs",
+    "action": "在 Stanford 毕业典礼上发表演讲",
+    "context": "被邀请对全体毕业生讲话；是我被诊断出癌症后第一次在重大公共场合讲述人生哲学",
+    "outcome": "三段式演讲成为 YouTube 最多观看的演讲之一；'Stay Hungry, Stay Foolish' 成为一代创业者的座右铭",
+    "scene_location": "Stanford Memorial Auditorium",
+    "scene_atmosphere": "毕业季晴朗阳光，袍子与欢呼",
+    "scene_sensory_notes": "演讲台前密密麻麻的学士袍，远处棕榈树",
+    "scene_subjective_experience": "把 connecting the dots、love & loss、death 三个故事串起来——这是我对人生最完整的一次公开总结",
+    "emotion": "沉静、坦诚、略带紧张",
+    "emotion_intensity": 0.75,
+    "importance": 0.9,
+    "emotion_intensity_score": 0.75,
+    "value_relevance_score": 0.95,
+    "novelty_score": 0.7,
+    "reusability_score": 0.95,
+    "tags_time_year": 2005,
+    "tags_time_month": 6,
+    "tags_time_period_label": "Stanford 演讲",
+    "tags_people": ["Stanford 毕业生"],
+    "tags_topic": ["死亡哲学", "好奇心", "人生三段"],
+    "tags_emotion_valence": "正面",
+    "tags_emotion_label": "坦诚",
+    "inferred_timestamp": "2005-06-12T00:00:00",
+    "status": "archived",
+    "event_kind": "writing",
+    "raw_quote": "Your time is limited, so don't waste it living someone else's life. Don't be trapped by dogma — which is living with the results of other people's thinking. Don't let the noise of others' opinions drown out your own inner voice. And most important, have the courage to follow your heart and intuition. They somehow already know what you truly want to become. Everything else is secondary. Stay Hungry. Stay Foolish."
+  },
+  {
+    "actor": "Steve Jobs",
+    "action": "在 Lost Interview 里对 Bob Cringely 坦白",
+    "context": "1995 年 NeXT 时期的访谈，当时这段录像被认为遗失多年，2011 年重新发现",
+    "outcome": "这段话成为我最被引用的自我认知宣言之一——『我不在乎对错，我在乎做对』",
+    "scene_location": "NeXT 办公室",
+    "scene_atmosphere": "小摄制组，非正式对谈氛围",
+    "scene_sensory_notes": "摄像机对面坐着 Cringely，白色墙壁，自然光",
+    "scene_subjective_experience": "这是我最坦诚的一次对话——没有 Keynote 的表演性，纯粹在讲我怎么思考",
+    "emotion": "坦率、放松、偶尔激动",
+    "emotion_intensity": 0.7,
+    "importance": 0.85,
+    "emotion_intensity_score": 0.7,
+    "value_relevance_score": 0.95,
+    "novelty_score": 0.6,
+    "reusability_score": 0.9,
+    "tags_time_year": 1995,
+    "tags_time_month": null,
+    "tags_time_period_label": "NeXT 时期",
+    "tags_people": ["Bob Cringely"],
+    "tags_topic": ["自我认知", "对错", "做对的事"],
+    "tags_emotion_valence": "正面",
+    "tags_emotion_label": "坦率",
+    "inferred_timestamp": "1995-06-01T00:00:00",
+    "status": "archived",
+    "event_kind": "conversation",
+    "raw_quote": "I don't really care about being right. I just care about success. I'll admit I'm wrong a lot. It doesn't really matter to me too much. What matters is that we do the right thing."
   }
 ]
 ```
 
-全套产出约 20-30 条 L1 events（时间线 14 行 + 决策文若干关键节点）。
+注：上方前 3 条生平/决策类事件也需加 `"event_kind": "biography"` 和 `"raw_quote": null`（为节省空间本文未逐条重复）。全套产出预估 ~100-200 条 L1 events：时间线 14 行 + 05-decisions 约 15 节 + 01-writings 约 30-50 段 + 02-conversations 约 40-60 条。
 
 ### 7.4 dialogue 时注入的 soul_anchor（摘要）
 
@@ -423,7 +537,14 @@ python core/nuwa_seed_builder.py steve-jobs jobs_v1
     · 把问题升维
     · 用死亡过滤
   表达DNA：短句+反问；二元判断（amazing/shit）；戏剧性停顿；极度确定
+  典型句式（模仿这些）：
+    · "Innovation is saying 'no' to 1,000 things."
+    · "Stay Hungry. Stay Foolish."
+    · "This is shit. A bozo product."
+    · "One more thing..."
+    · （完整 10 条见 soul.json）
   反模式：平庸、问卷式创新、委员会决策、销售驱动、妥协品质
+  自我认知：Ive 说我最专注卓越但代价大；Cook 提醒 'do the right thing, not what I would do'；外界长期两极——我知道并承认
   诚实边界：无法复制直觉；公开表达≠真实想法；2011 后的技术无表态
 ```
 
@@ -451,40 +572,49 @@ python core/nuwa_seed_builder.py steve-jobs jobs_v1
 2. `data/seeds/jobs_v1/` 下有完整 `seed.json` + `cognitive_profile.json` + `nuwa_source/`
 3. `data/agents/jobs_v1/` 下有 `soul.json`（含 5 个 core，cognitive_core 字段完整）+ `l0_buffer.json` + `l2_patterns.json` + `global_state.json` + LanceDB 记忆表
 4. `get_soul_anchor("jobs_v1")` 返回文本包含 cognitive_core 的可读 bullet 段落
-5. 在 `main_chat.py` 中用 `jobs_v1` 进行 3 轮对话，回答体现：
-   - 使用 expression_dna 中的高频词（insanely great / amazing / shit）
+5. 在 `main_chat.py` 中用 `jobs_v1` 进行 5 轮对话，回答体现：
+   - 使用 expression_dna 中的高频词（insanely great / amazing / shit），并能模仿 expression_exemplars 的句式（短句+反问+戏剧停顿）
    - 对抽象问题能基于 mental_models 推演（如"该不该做某产品"触发'先做减法'）
-   - 提到生平事件时能检索到 L1（如问起 1985 年被开除，能唤起情感细节）
+   - 提到生平事件时能检索到 L1 biography 事件（如问起 1985 年被开除，能唤起情感细节）
+   - 问起他的演讲或金句时能检索到 writing/conversation 类 L1（如问起 Stanford 演讲，能引用 `raw_quote` 原文）
+   - 问"别人怎么看你"或"你有什么缺点"时能回应 self_awareness 内容
+   - 触碰 honest_boundaries 场景（如问 2015 年之后的事）时会如实说明
 6. 对旧 agent（joon 等）的 dialogue 功能不退化（回归测试）
 
 ---
 
 ## 附录 A：`nuwa_skill_to_seed.txt` prompt 草稿
 
-> 输入：SKILL.md 全文 + agent_id + current_year=2026
+> 输入：SKILL.md 全文 + `references/research/03-expression-dna.md` + `references/research/04-external-views.md` + agent_id + current_year=2026
 >
-> 任务：提取结构化信息，输出符合本 spec §7.1 schema 的 JSON。
+> 任务：提取结构化信息，输出符合本 spec §7.1 schema 的 JSON（含 cognitive_core 全部 7 字段）。
 >
 > 规则：
 > 1. 章节标题（`## 身份卡` / `## 核心心智模型` 等）作为定位锚点
-> 2. mental_models 数量按 SKILL.md 实际数量（不强制 6 个）
-> 3. decision_heuristics 同上
-> 4. 对于已故人物（SKILL.md 中"关于死亡"段提到去世日期），`current_emotional_state` 等字段填"视角锚定在 {去世年} 年"
-> 5. `age` 填该锚定年份时的年龄
-> 6. 不推断、不编造；SKILL.md 没说的字段填合理的视角性默认值（不用 null）
-> 7. 只输出 JSON
+> 2. `mental_models` / `decision_heuristics` 数量按 SKILL.md 实际数量（不强制）
+> 3. `expression_dna` 从 SKILL.md 的 `## 表达DNA` 节提取结构化字段
+> 4. `expression_exemplars` 从 03-expression-dna.md 和 SKILL.md 中挑 10 条最具辨识度的**完整原句**（不要片段；要能作为 few-shot 范例）
+> 5. `anti_patterns` 从 SKILL.md 的 `## 价值观与反模式` > `我拒绝的` + `内在张力` 提取
+> 6. `self_awareness` 从 04-external-views.md 挑 5-10 条最具代表性的"别人怎么看我"观察（每条标明出处人物/身份）
+> 7. `honest_boundaries` 从 SKILL.md 的 `## 诚实边界` 整节复制
+> 8. 对已故人物（SKILL.md 中提到去世年），`current_emotional_state` 等字段填"视角锚定在 {去世年} 年"，`age` 填锚定年份时的年龄
+> 9. 不推断、不编造；SKILL.md 没说的字段填合理的视角性默认值（不用 null）
+> 10. 只输出 JSON
 
-## 附录 B：`nuwa_timeline_to_l1.txt` prompt 草稿
+## 附录 B：`nuwa_research_to_l1.txt` prompt 草稿
 
-> 输入：SKILL.md 的 `## 人物时间线` 表格 + `references/research/05-decisions.md` + `references/research/06-timeline.md`
+> 输入：SKILL.md 的 `## 人物时间线` 表格 + `references/research/05-decisions.md` + `references/research/01-writings.md` + `references/research/02-conversations.md` + `references/research/06-timeline.md`（作为 scene 细节补充源）
 >
-> 任务：生成 L1 events 列表，匹配 `prompts/seed_batch_load.txt` 的字段定义。
+> 任务：生成 L1 events 列表，匹配扩展后的 L1 schema（含新字段 `event_kind` / `raw_quote`）。
 >
 > 规则：
-> 1. 每个时间线行 → 1 条 event
-> 2. 决策文中的重大决策若不在时间线表格，额外生成 1 条
-> 3. scene_* 字段从 06-timeline.md 的细节推断，若无细节则合理构造
-> 4. importance 按 `emotion_intensity×0.3 + value_relevance×0.3 + novelty×0.2 + reusability×0.2` 计算
-> 5. `inferred_timestamp` 使用表格日期，精度能到月就到月
-> 6. 所有字段必须填实，不允许 null
-> 7. 只输出 JSON 数组
+> 1. 生平类（event_kind=biography）：时间线表每行 → 1 条，`raw_quote` = null
+> 2. 决策类（event_kind=decision）：05-decisions.md 每个决策分节 → 1 条，`raw_quote` = null（除非该决策有标志性原话）
+> 3. 表达类（event_kind=writing）：01-writings.md 每个段落/每篇 → 1 条，`raw_quote` 填写原文段落
+> 4. 对话类（event_kind=conversation）：02-conversations.md 每个问答对/金句 → 1 条，`raw_quote` 填写原话
+> 5. scene_* 字段从 06-timeline.md 或原文内容推断，无细节则合理构造
+> 6. importance 按 `emotion_intensity×0.3 + value_relevance×0.3 + novelty×0.2 + reusability×0.2` 计算
+> 7. `inferred_timestamp`：生平/决策类用历史日期；表达/对话类用发表日期；精度能到月就到月，不能到月就到年
+> 8. 所有字段必须填实（`raw_quote` 除外，按 event_kind 决定是否 null）
+> 9. 输入可能很长，超长时分批处理，同一文件不跨 batch
+> 10. 只输出 JSON 数组
