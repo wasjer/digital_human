@@ -15,6 +15,7 @@
 7. **所有字段必须填实**，不允许 null
 8. 只输出 JSON 数组，不加任何解释或 markdown 代码块
 9. 所有字段值使用中文（tags_emotion_valence 使用：正面/负面/混合/中性）
+10. `event_kind` 老访谈通路固定填 "biography"；`raw_quote` 老通路固定填 null
 
 ---
 人物：{agent_name}
@@ -50,7 +51,9 @@
     "tags_topic": ["职业转变", "自我认知"],
     "tags_emotion_valence": "混合",
     "tags_emotion_label": "忐忑",
-    "inferred_timestamp": "2020-09-01T00:00:00"
+    "inferred_timestamp": "2020-09-01T00:00:00",
+    "raw_quote": null,
+    "event_kind": "biography"
   }}
 ]
 
