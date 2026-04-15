@@ -14,7 +14,7 @@ _AGENTS_DIR = Path(__file__).parent.parent / "data" / "agents"
 _SEEDS_DIR  = Path(__file__).parent.parent / "data" / "seeds"
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
-CORES = ["emotion_core", "value_core", "goal_core", "relation_core"]
+CORES = ["emotion_core", "value_core", "goal_core", "relation_core", "cognitive_core"]
 
 # 每个核心各区的字段映射
 _CORE_FIELDS = {
@@ -37,6 +37,19 @@ _CORE_FIELDS = {
         "constitutional": ["attachment_style"],
         "slow_change":    ["key_relationships"],
         "elastic":        ["current_relation_state"],
+    },
+    "cognitive_core": {
+        "constitutional": [
+            "mental_models",
+            "decision_heuristics",
+            "expression_dna",
+            "expression_exemplars",
+            "anti_patterns",
+            "self_awareness",
+            "honest_boundaries",
+        ],
+        "slow_change": [],
+        "elastic":     [],
     },
 }
 
