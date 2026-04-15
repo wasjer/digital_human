@@ -324,10 +324,36 @@ def check_constitutional_conflict(agent_id: str, content: str) -> dict:
     return default
 
 
+def _render_constitutional_value(value) -> str:
+    """把宪法区字段的值（str / list / dict）渲染为 anchor 文本。"""
+    if value is None:
+        return "None"
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        lines = []
+        for item in value:
+            if isinstance(item, dict):
+                if "name" in item and "one_liner" in item:
+                    lines.append(f"    · {item['name']}：{item['one_liner']}")
+                elif "rule" in item:
+                    lines.append(f"    · {item['rule']}")
+                else:
+                    lines.append(f"    · {json.dumps(item, ensure_ascii=False)}")
+            else:
+                lines.append(f"    · {item}")
+        return "\n" + "\n".join(lines)
+    if isinstance(value, dict):
+        lines = [f"    · {k}: {v}" for k, v in value.items()]
+        return "\n" + "\n".join(lines)
+    return str(value)
+
+
 def get_soul_anchor(agent_id: str) -> str:
     """
     返回所有核心宪法区+缓变区的摘要文本，控制在 SOUL_ANCHOR_MAX_TOKENS 以内，中文。
     使用字符预算（4字符 ≈ 1 token）近似控制长度。
+    对 list/dict 类型的宪法字段做 bullet 展开。
     """
     soul = read_soul(agent_id)
     char_budget = config.SOUL_ANCHOR_MAX_TOKENS * 4
@@ -336,7 +362,8 @@ def get_soul_anchor(agent_id: str) -> str:
         core_lines = [_ANCHOR_CORE_FMT.format(core=core)]
         c = soul[core]["constitutional"]
         for f in _CORE_FIELDS[core]["constitutional"]:
-            core_lines.append(_ANCHOR_CONST_FMT.format(field=f, value=c.get(f)))
+            rendered = _render_constitutional_value(c.get(f))
+            core_lines.append(_ANCHOR_CONST_FMT.format(field=f, value=rendered))
         sc = soul[core]["slow_change"]
         for f in _CORE_FIELDS[core]["slow_change"]:
             core_lines.append(_ANCHOR_SLOW_FMT.format(field=f, value=sc[f].get("value")))
