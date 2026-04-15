@@ -55,6 +55,8 @@ def _l1_schema() -> pa.Schema:
         pa.field("tags_emotion_label",         pa.utf8()),
         pa.field("source",                     pa.utf8()),
         pa.field("ttl_days",                   pa.int32()),
+        pa.field("raw_quote",                  pa.utf8()),
+        pa.field("event_kind",                 pa.utf8()),
     ])
 
 
@@ -263,6 +265,8 @@ def write_event(agent_id: str, raw_text: str, source: str = "dialogue") -> list[
                 "tags_emotion_label":          str(tags.get("emotion_label") or ""),
                 "source":                      source,
                 "ttl_days":                    365,
+                "raw_quote":                   str(ev.get("raw_quote") or ""),
+                "event_kind":                  str(ev.get("event_kind") or "biography"),
             }
             tbl.add([row])
 

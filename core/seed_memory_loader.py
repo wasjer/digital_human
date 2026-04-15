@@ -301,6 +301,8 @@ def _write_events_to_l1(agent_id: str, agent_name: str, events: list[dict]) -> l
                 "tags_emotion_label":           str(ev.get("tags_emotion_label") or ""),
                 "source":                       "seed",
                 "ttl_days":                     365 * 10,   # 种子记忆长期保留
+                "raw_quote":                    str(ev.get("raw_quote") or ""),
+                "event_kind":                   str(ev.get("event_kind") or "biography"),
             }
             tbl.add([row])
             written.append((event_id, inferred_ts))
