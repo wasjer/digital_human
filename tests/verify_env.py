@@ -1,23 +1,29 @@
 import sys
 import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import json
 import urllib.request
-from config import EMBEDDING_MODEL, EMBEDDING_BASE_URL, EMBEDDING_DIM, CHAT_MODEL, CHAT_BASE_URL
+from config import EMBEDDING_MODEL, EMBEDDING_BASE_URL, EMBEDDING_DIM, CHAT_MODEL, CHAT_BASE_URL, SILICONFLOW_API_KEY
 
-def post(url, payload):
+def post(url, payload, headers=None):
     data = json.dumps(payload).encode()
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    h = {"Content-Type": "application/json"}
+    if headers:
+        h.update(headers)
+    req = urllib.request.Request(url, data=data, headers=h)
     with urllib.request.urlopen(req, timeout=60) as resp:
         return json.loads(resp.read())
 
 def verify_embedding():
     print("=== 验证 Embedding ===")
     try:
-        result = post(f"{EMBEDDING_BASE_URL}/api/embeddings", {
-            "model": EMBEDDING_MODEL,
-            "prompt": "你好世界"
-        })
-        embedding = result["embedding"]
+        api_key = SILICONFLOW_API_KEY or os.environ.get("SILICONFLOW_API_KEY", "")
+        result = post(
+            f"{EMBEDDING_BASE_URL}/embeddings",
+            {"model": EMBEDDING_MODEL, "input": "你好世界"},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        embedding = result["data"][0]["embedding"]
         dim = len(embedding)
         print(f"Embedding 维度: {dim}")
         if dim == EMBEDDING_DIM:

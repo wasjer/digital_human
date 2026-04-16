@@ -24,8 +24,9 @@ CHAT_MODEL = "deepseek-chat"
 CHAT_BASE_URL = "https://api.deepseek.com"
 
 # 向量嵌入模型
-EMBEDDING_MODEL = "bge-m3"
-EMBEDDING_BASE_URL = "http://localhost:11434"
+EMBEDDING_MODEL = "BAAI/bge-m3"
+EMBEDDING_BASE_URL = "https://api.siliconflow.cn/v1"
+SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY")
 EMBEDDING_DIM = 1024           # 向量维度
 
 # 衰减配置

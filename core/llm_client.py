@@ -93,17 +93,23 @@ def chat_completion(
 
 
 def get_embedding(text: str) -> list[float]:
-    """调用本地 Ollama 生成 embedding，返回 float 列表。不随 LLM_PROVIDER 切换。"""
+    """调用 SiliconFlow bge-m3 生成 embedding，返回 float 列表。不随 LLM_PROVIDER 切换。"""
 
     def _call():
-        payload = json.dumps({"model": config.EMBEDDING_MODEL, "prompt": text}).encode()
+        api_key = config.SILICONFLOW_API_KEY or os.environ.get("SILICONFLOW_API_KEY", "")
+        if not api_key:
+            raise RuntimeError("SILICONFLOW_API_KEY 未配置（config.py 或环境变量）")
+        payload = json.dumps({"model": config.EMBEDDING_MODEL, "input": text}).encode()
         req = urllib.request.Request(
-            f"{config.EMBEDDING_BASE_URL}/api/embeddings",
+            f"{config.EMBEDDING_BASE_URL}/embeddings",
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            },
         )
         with urllib.request.urlopen(req, timeout=60) as resp:
-            return json.loads(resp.read())["embedding"]
+            return json.loads(resp.read())["data"][0]["embedding"]
 
     result = _retry(_call, operation="get_embedding")
     logger.info(f"get_embedding dim={len(result)}")
