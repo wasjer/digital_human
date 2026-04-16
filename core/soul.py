@@ -265,6 +265,8 @@ def decay_evidence(agent_id: str) -> None:
     soul = read_soul(agent_id)
     rate = config.SOUL_EVIDENCE_DECAY_RATE
     for core in CORES:
+        if core not in soul:
+            continue
         for field_data in soul[core]["slow_change"].values():
             field_data["evidence_score"] = field_data.get("evidence_score", 0.0) * rate
     _write_soul(agent_id, soul)
@@ -276,6 +278,8 @@ def check_slow_change(agent_id: str) -> list:
     soul = read_soul(agent_id)
     result = []
     for core in CORES:
+        if core not in soul:
+            continue
         for field, data in soul[core]["slow_change"].items():
             if data.get("evidence_score", 0.0) > data.get("change_threshold", 2.0):
                 result.append({"core": core, "field": field,
@@ -359,6 +363,8 @@ def get_soul_anchor(agent_id: str) -> str:
     char_budget = config.SOUL_ANCHOR_MAX_TOKENS * 4
     lines = []
     for core in CORES:
+        if core not in soul:
+            continue
         core_lines = [_ANCHOR_CORE_FMT.format(core=core)]
         c = soul[core]["constitutional"]
         for f in _CORE_FIELDS[core]["constitutional"]:
