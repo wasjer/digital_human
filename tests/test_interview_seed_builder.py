@@ -247,3 +247,79 @@ def test_build_soul_from_gated_seed_fills_above_threshold_only(tmp_path, monkeyp
     assert "confidence_detail" in cog
     assert cog["confidence_detail"]["expression_exemplars"] == 0.95
     assert cog["confidence_detail"]["decision_heuristics"] == 0.35
+
+
+def test_write_build_report_sections(tmp_path):
+    parsed = {
+        "agent_id": "txf",
+        "session_id": "abc123",
+        "completed_at": "2026-04-15T19:30:52.964Z",
+        "duration_minutes": 81,
+    }
+    raw_seed = {
+        "name":       {"value": "Jacky", "confidence": 0.95},
+        "age":        {"value": 42,      "confidence": 0.99},
+        "occupation": {"value": "茶叶",  "confidence": 0.98},
+        "location":   {"value": "合肥",  "confidence": 0.99},
+        "emotion_core": {
+            "base_emotional_type":        {"value": "内敛", "confidence": 0.8},
+            "emotional_regulation_style": {"value": "散步", "confidence": 0.4},
+            "current_emotional_state":    {"value": "放松", "confidence": 0.7},
+        },
+        "value_core": {
+            "moral_baseline":       {"value": "真实", "confidence": 0.6},
+            "value_priority_order": {"value": "家庭", "confidence": 0.3},
+            "current_value_focus":  {"value": "孩子", "confidence": 0.8},
+        },
+        "goal_core": {
+            "life_direction":     {"value": "慢生活", "confidence": 0.7},
+            "mid_term_goals":     {"value": "旅行",   "confidence": 0.6},
+            "current_phase_goal": {"value": "休假",   "confidence": 0.2},
+        },
+        "relation_core": {
+            "attachment_style":       {"value": "独立", "confidence": 0.4},
+            "key_relationships":      {"value": ["x"], "confidence": 0.9},
+            "current_relation_state": {"value": "稳",  "confidence": 0.7},
+        },
+        "cognitive_core": {
+            "mental_models":        {"value": [],  "confidence": 0.3},
+            "decision_heuristics":  {"value": [],  "confidence": 0.35},
+            "expression_dna":       {"value": "x", "confidence": 0.8},
+            "expression_exemplars": {"value": [], "confidence": 0.95},
+            "anti_patterns":        {"value": [], "confidence": 0.4},
+            "self_awareness":       {"value": "x", "confidence": 0.8},
+            "honest_boundaries":    {"value": "x", "confidence": 0.35},
+        },
+        "follow_up_questions": {
+            "relation_core.attachment_style": ["追问 1", "追问 2"],
+            "cognitive_core.honest_boundaries": ["追问边界"],
+        },
+    }
+    stats = {
+        "elapsed_seconds":   42,
+        "biography_count":   17,
+        "meta_count":        1,
+        "status_dist":       {"active": 6, "dormant": 4, "archived": 8},
+        "l2_pattern_count":  3,
+        "soul_contributions":2,
+        "topic_dist":        {"职业": 5, "家庭": 4},
+    }
+    out = tmp_path / "build_report.md"
+    isb._write_build_report(str(out), parsed, raw_seed, stats)
+    text = out.read_text(encoding="utf-8")
+
+    assert "# Agent 构建报告：txf" in text
+    assert "abc123" in text
+    assert "81" in text
+    assert "Jacky" in text and "42" in text
+    for core in ["emotion_core", "value_core", "goal_core", "relation_core", "cognitive_core"]:
+        assert core in text
+    assert "relation_core.attachment_style" in text
+    assert "追问 1" in text
+    assert "value_priority_order" in text
+    follow_up_section = text.split("## 回访建议", 1)[1]
+    assert "current_value_focus" not in follow_up_section
+    assert "17" in text and "18" in text
+    assert "active=6" in text or "active: 6" in text or "6 / 4 / 8" in text
+    assert "L2 Patterns" in text
+    assert "42" in text

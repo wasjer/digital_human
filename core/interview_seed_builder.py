@@ -330,3 +330,138 @@ def _build_soul_from_gated_seed(agent_id: str, raw_seed: dict) -> dict:
     cog_const["source"] = "interview"
 
     return soul
+
+
+_IDENTITY_FIELDS = ["name", "age", "occupation", "location"]
+
+
+def _fmt_conf(raw_field) -> str:
+    if isinstance(raw_field, dict) and isinstance(raw_field.get("confidence"), (int, float)):
+        return f"{raw_field['confidence']:.2f}"
+    return "—"
+
+
+def _status_for_conf(raw_field) -> str:
+    if not isinstance(raw_field, dict):
+        return "—"
+    val  = raw_field.get("value")
+    conf = raw_field.get("confidence")
+    if val is None:
+        return "— 无信号"
+    if not isinstance(conf, (int, float)):
+        return "— confidence 异常"
+    if conf >= config.INTERVIEW_CONFIDENCE_THRESHOLD:
+        return "✅ 已写入"
+    return "⚠️ 未写入（回访）"
+
+
+def _format_value_preview(value, max_len: int = 80) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, str):
+        s = value.replace("\n", " ")
+    else:
+        s = json.dumps(value, ensure_ascii=False)
+    if len(s) > max_len:
+        s = s[:max_len] + "…"
+    return s
+
+
+def _write_build_report(out_path: str, parsed: dict, raw_seed: dict, stats: dict) -> None:
+    now_str  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    biography = stats.get("biography_count", 0)
+    meta      = stats.get("meta_count", 0)
+    total     = biography + meta
+    status    = stats.get("status_dist", {})
+    a = status.get("active", 0); d = status.get("dormant", 0); z = status.get("archived", 0)
+
+    lines: list[str] = []
+    agent_id = parsed["agent_id"]
+    lines.append(f"# Agent 构建报告：{agent_id}\n")
+    lines.append(f"- 构建时间：{now_str}")
+    lines.append(f"- 来源：`{parsed.get('source_md_rel', '(未知)')}`")
+    lines.append(f"- 访谈时间：{parsed.get('completed_at','')}（时长 {parsed.get('duration_minutes',0)} 分钟）")
+    lines.append(f"- 访谈 session_id：{parsed.get('session_id','')}")
+    lines.append(f"- 耗时：{stats.get('elapsed_seconds', 0)}s\n")
+
+    lines.append("## 基础身份\n")
+    lines.append("| 字段 | 值 | confidence |")
+    lines.append("|---|---|---|")
+    for f in _IDENTITY_FIELDS:
+        node = raw_seed.get(f) or {}
+        val  = node.get("value") if isinstance(node, dict) else None
+        lines.append(f"| {f} | {_format_value_preview(val)} | {_fmt_conf(node)} |")
+    lines.append("")
+
+    lines.append("## Soul 填充情况\n")
+    SOUL_CORES_IN_REPORT = ["emotion_core", "value_core", "goal_core", "relation_core", "cognitive_core"]
+    for core in SOUL_CORES_IN_REPORT:
+        raw_core = raw_seed.get(core) or {}
+        fields   = _CORE_FIELDS[core]
+        lines.append(f"### {core}")
+        lines.append("| 区 | 字段 | 状态 | conf |")
+        lines.append("|---|---|---|---|")
+        for zone, zone_fields in [
+            ("constitutional", fields["constitutional"]),
+            ("slow_change",    fields["slow_change"]),
+            ("elastic",        fields["elastic"]),
+        ]:
+            for f in zone_fields:
+                node = raw_core.get(f)
+                lines.append(f"| {zone} | {f} | {_status_for_conf(node)} | {_fmt_conf(node)} |")
+        lines.append("")
+
+    lines.append("## 回访建议\n")
+    lines.append("以下字段 LLM 看到了部分信号但把握不足，未写入 soul，建议下一轮访谈重点追问：\n")
+    follow_ups = raw_seed.get("follow_up_questions") or {}
+    threshold  = config.INTERVIEW_CONFIDENCE_THRESHOLD
+    has_entries = False
+
+    for core in SOUL_CORES_IN_REPORT:
+        raw_core = raw_seed.get(core) or {}
+        fields   = _CORE_FIELDS[core]
+        for zone_fields in [fields["constitutional"], fields["slow_change"], fields["elastic"]]:
+            for f in zone_fields:
+                node = raw_core.get(f)
+                if not isinstance(node, dict):
+                    continue
+                conf = node.get("confidence")
+                if not isinstance(conf, (int, float)):
+                    continue
+                if conf <= 0.0 or conf >= threshold:
+                    continue
+                has_entries = True
+                key = f"{core}.{f}"
+                lines.append(f"- **{key}** (conf={conf:.2f})")
+                lines.append(f"    - LLM 临时判断：{_format_value_preview(node.get('value'), max_len=120)}")
+                suggested = follow_ups.get(key) or []
+                if suggested:
+                    for q in suggested:
+                        lines.append(f"    - 建议追问：{q}")
+                else:
+                    lines.append("    - 建议追问：（无 LLM 建议追问）")
+    if not has_entries:
+        lines.append("（无 —— 所有字段 confidence 都 ≥ 阈值或无信号）")
+    lines.append("")
+
+    lines.append("## L1 记忆\n")
+    lines.append(f"- Biography 事件：{biography} 条")
+    lines.append(f"- Meta 事件：{meta} 条")
+    lines.append(f"- 总计：{total} 条")
+    lines.append(f"- 状态分布：active={a}, dormant={d}, archived={z}\n")
+
+    topic_dist = stats.get("topic_dist") or {}
+    if topic_dist:
+        lines.append("### 按主题分布")
+        for topic, count in sorted(topic_dist.items(), key=lambda kv: -kv[1]):
+            lines.append(f"- {topic}：{count} 条")
+        lines.append("")
+
+    lines.append("## L2 Patterns\n")
+    lines.append(f"- 生成：{stats.get('l2_pattern_count', 0)} 条\n")
+
+    lines.append("## Soul 证据贡献\n")
+    lines.append(f"- L1 → Soul 缓变区积分次数：{stats.get('soul_contributions', 0)}")
+
+    Path(out_path).write_text("\n".join(lines), encoding="utf-8")
+    logger.info(f"_write_build_report written to {out_path}")
