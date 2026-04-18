@@ -72,7 +72,7 @@ def _retry(fn, operation: str, max_retries: int = 3, base_delay: float = 2.0):
 
 def chat_completion(
     messages: list[dict],
-    max_tokens: int = 1024,
+    max_tokens: int = 4096,
     temperature: float = 0.7,
 ) -> str:
     """根据 LLM_PROVIDER 路由调用 chat，返回回复文本。embedding 不受影响。"""
