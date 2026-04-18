@@ -46,3 +46,8 @@ def test_raises_on_empty():
 def test_raises_on_whitespace_only():
     with pytest.raises(EmptyResponseError):
         _sanitize('   \n\t  ')
+
+
+def test_raises_on_none():
+    with pytest.raises(EmptyResponseError):
+        _sanitize(None)
