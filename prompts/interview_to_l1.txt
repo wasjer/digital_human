@@ -1,0 +1,63 @@
+你是一个记忆结构化专家。你将读取一段访谈对话（访谈员与受访者的 Q&A），把受访者**自己叙述过的过往人生事件**转化为第一人称的原子事件记忆，供 L1 长期记忆层使用。
+
+## 核心规则
+
+1. **只抽取受访者自己叙述过的过往人生事件**。访谈员的话只用于理解语境，不要把访谈员的总结、重述或引导问题当成事件。
+2. **第一人称视角**：actor 固定为受访者的名字（或 agent_id）。
+3. **原子化**：每条记忆是一件具体的、独立的事件，不是抽象总结或概括。
+4. **时间推断锚点**：受访者在 `{interview_date}`（{current_age} 岁）接受访谈。据此逆推每条事件的 `tags_time_year / tags_time_month / inferred_timestamp`。能推断到月份就写月份，只能确定年份就写年份。
+5. **原话留档**：`raw_quote` 填受访者说过的原话（完整句子或至少一个完整表达），不要改写、不要总结。
+6. **所有字段必须填实**，无法确定的字段做最合理的估算或留空字符串（但 actor/action/context/outcome 不允许空）。
+7. `event_kind` 固定填 `"biography"`。
+8. 所有字段值使用中文（`tags_emotion_valence` 使用：正面 / 负面 / 混合 / 中性）。
+9. 只输出 JSON 数组，不加任何解释或 markdown 代码块。
+
+## 打分标准（0~1）
+
+- `emotion_intensity_score`：情绪强度
+- `value_relevance_score`：与核心价值观的相关度
+- `novelty_score`：新奇度/转折性
+- `reusability_score`：可供未来决策参考的模式性
+- `importance = emotion_intensity×0.3 + value_relevance×0.3 + novelty×0.2 + reusability×0.2`
+
+---
+
+受访者：{agent_name}
+访谈时间：{interview_date}
+受访者当前年龄：{current_age} 岁
+
+访谈全文：
+{dialogue_text}
+
+请输出 JSON 数组（每条受访者叙述过的重要事件一条，不强求每个话题都抽；宁可少、不可瞎编）：
+
+[
+  {{
+    "actor":   "{agent_name}",
+    "action":  "做了什么（具体动作/决定/经历）",
+    "context": "当时的背景情况，为什么会发生这件事",
+    "outcome": "事件的结果或影响",
+    "scene_location":              "事件发生的具体地点或'未知'",
+    "scene_atmosphere":            "当时的整体氛围或'未知'",
+    "scene_sensory_notes":         "感官细节或'未知'",
+    "scene_subjective_experience": "当时的主观内心体验",
+    "emotion":                     "具体情绪描述",
+    "emotion_intensity":      0.0,
+    "importance":             0.0,
+    "emotion_intensity_score":0.0,
+    "value_relevance_score":  0.0,
+    "novelty_score":          0.0,
+    "reusability_score":      0.0,
+    "tags_time_year":         2014,
+    "tags_time_month":        0,
+    "tags_time_week":         0,
+    "tags_time_period_label": "30 岁左右",
+    "tags_people":            ["相关人物（化名）"],
+    "tags_topic":             ["职业转变", "家庭"],
+    "tags_emotion_valence":   "混合",
+    "tags_emotion_label":     "笃定",
+    "inferred_timestamp":     "2014-06-01T00:00:00",
+    "raw_quote":              "受访者原话",
+    "event_kind":             "biography"
+  }}
+]
