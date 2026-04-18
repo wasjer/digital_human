@@ -111,6 +111,6 @@ def get_embedding(text: str) -> list[float]:
         with urllib.request.urlopen(req, timeout=60) as resp:
             return json.loads(resp.read())["data"][0]["embedding"]
 
-    result = _retry(_call, operation="get_embedding")
+    result = _retry(_call, operation="get_embedding", max_retries=5)
     logger.info(f"get_embedding dim={len(result)}")
     return result

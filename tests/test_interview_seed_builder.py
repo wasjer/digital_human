@@ -140,6 +140,19 @@ def test_gate_custom_threshold():
     assert isb._gate({"value": "x", "confidence": 0.1}, threshold=0.2) is None
 
 
+def test_normalize_iso_timestamp():
+    from datetime import datetime
+    assert isb._normalize_iso_timestamp("2026-04-15T19:30:52.964Z") == "2026-04-15T19:30:52"
+    assert isb._normalize_iso_timestamp("2026-04-15T19:30:52Z") == "2026-04-15T19:30:52"
+    assert isb._normalize_iso_timestamp("2026-04-15T19:30:52+08:00") == "2026-04-15T19:30:52"
+    assert isb._normalize_iso_timestamp("2026-04-15T19:30:52") == "2026-04-15T19:30:52"
+    # 结果必须能被 fromisoformat 成功解析
+    datetime.fromisoformat(isb._normalize_iso_timestamp("2026-04-15T19:30:52.964Z"))
+    # 空串/非法字串：原样返回
+    assert isb._normalize_iso_timestamp("") == ""
+    assert isb._normalize_iso_timestamp("garbage") == "garbage"
+
+
 def test_build_meta_event_basic():
     parsed = {
         "agent_id": "txf",
@@ -158,7 +171,7 @@ def test_build_meta_event_basic():
     assert event["actor"] == "Jacky"
     assert event["event_kind"] == "meta"
     assert event["source"] == "interview_meta"
-    assert event["inferred_timestamp"] == "2026-04-15T19:30:52.964Z"
+    assert event["inferred_timestamp"] == "2026-04-15T19:30:52"
     assert "81" in event["context"]
     assert "小灵" in event["context"]
     assert "开场" in event["outcome"]

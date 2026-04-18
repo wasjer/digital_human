@@ -180,6 +180,28 @@ def _month_from_iso(ts: str) -> int:
         return 0
 
 
+def _normalize_iso_timestamp(ts: str) -> str:
+    """把 `2026-04-15T19:30:52.964Z` 归一为 `_days_since` 能解析的朴素 ISO。
+
+    去掉 `Z`/`+00:00` 时区后缀和毫秒，保证 datetime.fromisoformat 可读。
+    解析失败返回原字符串。
+    """
+    if not ts:
+        return ts
+    try:
+        cleaned = ts.rstrip()
+        if cleaned.endswith("Z"):
+            cleaned = cleaned[:-1]
+        if "+" in cleaned[10:]:
+            cleaned = cleaned[: 10 + cleaned[10:].index("+")]
+        if "." in cleaned:
+            cleaned = cleaned.split(".", 1)[0]
+        datetime.fromisoformat(cleaned)
+        return cleaned
+    except Exception:
+        return ts
+
+
 def _build_meta_event(parsed: dict, agent_name: str) -> dict:
     """
     用访谈 frontmatter 确定性构造一条 L1 meta 事件（无 LLM）。
@@ -220,7 +242,7 @@ def _build_meta_event(parsed: dict, agent_name: str) -> dict:
         "tags_topic":             ["访谈", "自我叙述"],
         "tags_emotion_valence":   "中性",
         "tags_emotion_label":     "回顾",
-        "inferred_timestamp":     parsed.get("completed_at", ""),
+        "inferred_timestamp":     _normalize_iso_timestamp(parsed.get("completed_at", "")),
         "raw_quote":              None,
         "event_kind":             "meta",
         "source":                 "interview_meta",
