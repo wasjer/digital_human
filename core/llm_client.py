@@ -5,6 +5,7 @@ import time
 import logging
 import urllib.request
 import urllib.error
+from typing import Optional
 
 from openai import OpenAI
 
@@ -21,7 +22,14 @@ logger = logging.getLogger("llm_client")
 
 # ── 响应清洗 ────────────────────────────────────────────────────────────────
 
+# Matches bare <think>…</think>. NOTE: GLM-4.5+ may return <think type="...">…</think>
+# which will NOT match. If Task 9's smoke run shows unstripped GLM think blocks, broaden
+# this regex to r"<think\b[^>]*>[\s\S]*?</think>" and add a corresponding test.
 _THINK_CLOSED_RE = re.compile(r"<think>[\s\S]*?</think>", re.DOTALL)
+# Truncation heuristic: if <think> is opened but never closed, strip from <think>
+# up to the first { or [. Known limitation: if the think body itself contains a
+# literal { or [, we stop too early — accepted, since real truncation is rare and
+# think-containing-brace content is rarer.
 _THINK_OPEN_ONLY_RE = re.compile(r"<think>[\s\S]*?(?=[\{\[])", re.DOTALL)
 _FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]+?)\s*```", re.DOTALL)
 
@@ -30,7 +38,7 @@ class EmptyResponseError(RuntimeError):
     """LLM 返回空字符串或纯空白。"""
 
 
-def _sanitize(raw: str) -> str:
+def _sanitize(raw: Optional[str]) -> str:
     """把 LLM 返回内容里 provider 相关的包裹去掉，返回可直接 json.loads 的字符串。
     对非 JSON 的纯文本返回（如情绪打分、对话回复）也安全——只是原样 trim。"""
     if raw is None:
