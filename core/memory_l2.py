@@ -84,6 +84,18 @@ def _fetch_archived_events(agent_id: str) -> list[dict]:
         return []
 
 
+def _fetch_all_events(agent_id: str) -> list[dict]:
+    """从 LanceDB 取该 agent 所有事件（忽略 status），用于初始化时的 L2 归纳。"""
+    from core.memory_l1 import _get_table
+    try:
+        tbl  = _get_table(agent_id)
+        rows = tbl.search().limit(99999).to_list()
+        return rows
+    except Exception as e:
+        logger.warning(f"_fetch_all_events agent_id={agent_id} error={e}")
+        return []
+
+
 def _parse_topics(tags_topic_str: str) -> list[str]:
     """解析 tags_topic 字段（JSON 字符串或裸字符串），返回 topic 列表。"""
     if not tags_topic_str:
@@ -113,27 +125,35 @@ def _events_to_summary(events: list[dict]) -> str:
 
 # ── 核心接口 ──────────────────────────────────────────────────────────────────
 
-def check_and_generate_patterns(agent_id: str) -> list[str]:
+def check_and_generate_patterns(
+    agent_id: str,
+    include_all_statuses: bool = False,
+) -> list[str]:
     """
     触发逻辑（规则引擎，不是 LLM 扫全部事件）：
     1. 快照当前 l2_patterns.json
-    2. 从 LanceDB 取所有 status='archived' 的事件
+    2. 取事件（默认 archived；初始化通路传 include_all_statuses=True 囊括 active/dormant）
     3. 按 tags_topic 分组
-    4. 对每个 topic，若 archived 事件数 >= L2_SAME_TOPIC_THRESHOLD，调用 LLM
+    4. 对每个 topic，若事件数 >= L2_SAME_TOPIC_THRESHOLD，调用 LLM
     5. 写回，返回本次新增或更新的 pattern_id 列表
     """
     # 1. 快照
     last_known_good_state = copy.deepcopy(_read_patterns(agent_id))
 
-    # 2. 取 archived 事件
-    archived_events = _fetch_archived_events(agent_id)
-    if not archived_events:
-        logger.info(f"check_and_generate_patterns agent_id={agent_id} no archived events, skip")
+    # 2. 取事件
+    if include_all_statuses:
+        candidate_events = _fetch_all_events(agent_id)
+        reason = "all-statuses mode"
+    else:
+        candidate_events = _fetch_archived_events(agent_id)
+        reason = "archived-only mode"
+    if not candidate_events:
+        logger.info(f"check_and_generate_patterns agent_id={agent_id} no events ({reason}), skip")
         return []
 
     # 3. 按 topic 分组
     topic_events: dict[str, list[dict]] = {}
-    for ev in archived_events:
+    for ev in candidate_events:
         for topic in _parse_topics(ev.get("tags_topic", "")):
             topic_events.setdefault(topic, []).append(ev)
 
