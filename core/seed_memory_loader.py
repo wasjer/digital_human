@@ -430,7 +430,7 @@ def load_agent_from_nodes(
 
     # ── Step 8：L2 生成 + Soul 积分 ──
     logger.info("Step 8/8: L2 patterns + Soul evidence")
-    l2_updated = check_and_generate_patterns(agent_id)
+    l2_updated = check_and_generate_patterns(agent_id, include_all_statuses=True)
     soul_contributions = contribute_to_soul(agent_id)
 
     # 检查 Soul 缓变区是否触发更新

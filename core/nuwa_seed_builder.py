@@ -258,7 +258,7 @@ def build_from_nuwa(person_slug: str, agent_id: str, force: bool = False) -> dic
 
     # Step 10: L2 + Soul 积分（cognitive_core 无 slow_change，自然跳过）
     logger.info("Step 10/10: L2 patterns + Soul evidence contribution")
-    l2_updated = check_and_generate_patterns(agent_id)
+    l2_updated = check_and_generate_patterns(agent_id, include_all_statuses=True)
     soul_contribs = contribute_to_soul(agent_id)
 
     elapsed = (datetime.now() - start_time).seconds
