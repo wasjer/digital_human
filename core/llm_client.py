@@ -86,14 +86,20 @@ def _get_chat_client() -> tuple[OpenAI, str]:
 
     if provider == "minimax":
         api_key = os.environ.get("MINIMAX_API_KEY", "")
+        if not api_key:
+            raise RuntimeError("MINIMAX_API_KEY 未配置（环境变量）")
         return OpenAI(api_key=api_key, base_url=config.MINIMAX_BASE_URL), config.MINIMAX_MODEL
 
     if provider == "kimi":
         api_key = os.environ.get("KIMI_API_KEY", "")
+        if not api_key:
+            raise RuntimeError("KIMI_API_KEY 未配置（环境变量）")
         return OpenAI(api_key=api_key, base_url=config.KIMI_BASE_URL), config.KIMI_MODEL
 
     if provider == "glm":
         api_key = os.environ.get("GLM_API_KEY", "")
+        if not api_key:
+            raise RuntimeError("GLM_API_KEY 未配置（环境变量）")
         return OpenAI(api_key=api_key, base_url=config.GLM_BASE_URL), config.GLM_MODEL
 
     raise RuntimeError(f"未知 LLM_PROVIDER: {provider!r}，可选: deepseek | minimax | kimi | glm")
@@ -134,8 +140,10 @@ def chat_completion(
         )
         return resp.choices[0].message.content
 
-    result = _retry(_call, operation="chat_completion")
-    logger.info(f"chat_completion result_len={len(result)}")
+    result_raw = _retry(_call, operation="chat_completion")
+    result = _sanitize(result_raw)
+    trimmed = (len(result_raw) if result_raw else 0) - len(result)
+    logger.info(f"chat_completion result_len={len(result)} sanitize_trimmed={trimmed}")
     return result
 
 
