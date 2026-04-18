@@ -5,6 +5,7 @@ _ROOT = Path(__file__).parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+import json
 import pytest
 from core import interview_seed_builder as isb
 
@@ -323,3 +324,137 @@ def test_write_build_report_sections(tmp_path):
     assert "active=6" in text or "active: 6" in text or "6 / 4 / 8" in text
     assert "L2 Patterns" in text
     assert "42" in text
+
+
+def _fake_seed_response() -> str:
+    seed = {
+        "name":       {"value": "Jacky", "confidence": 0.95},
+        "age":        {"value": 42,       "confidence": 0.99},
+        "occupation": {"value": "茶叶",  "confidence": 0.98},
+        "location":   {"value": "合肥",  "confidence": 0.99},
+        "emotion_core": {
+            "base_emotional_type":        {"value": "内敛", "confidence": 0.8},
+            "emotional_regulation_style": {"value": "散步", "confidence": 0.7},
+            "current_emotional_state":    {"value": "放松", "confidence": 0.7},
+        },
+        "value_core": {
+            "moral_baseline":       {"value": "真实", "confidence": 0.6},
+            "value_priority_order": {"value": "家庭", "confidence": 0.3},
+            "current_value_focus":  {"value": "孩子", "confidence": 0.8},
+        },
+        "goal_core": {
+            "life_direction":     {"value": "慢生活",  "confidence": 0.7},
+            "mid_term_goals":     {"value": "旅行",    "confidence": 0.6},
+            "current_phase_goal": {"value": "休假",    "confidence": 0.2},
+        },
+        "relation_core": {
+            "attachment_style":       {"value": "独立", "confidence": 0.4},
+            "key_relationships":      {"value": ["伴侣"], "confidence": 0.9},
+            "current_relation_state": {"value": "稳定",   "confidence": 0.7},
+        },
+        "cognitive_core": {
+            "mental_models":        {"value": [], "confidence": 0.3},
+            "decision_heuristics":  {"value": [], "confidence": 0.35},
+            "expression_dna":       {"value": "冷静务实", "confidence": 0.8},
+            "expression_exemplars": {"value": ["句1","句2","句3","句4","句5","句6","句7","句8","句9","句10"], "confidence": 0.95},
+            "anti_patterns":        {"value": [], "confidence": 0.4},
+            "self_awareness":       {"value": "中庸实用主义", "confidence": 0.8},
+            "honest_boundaries":    {"value": "保留",        "confidence": 0.4},
+        },
+        "recent_self_narrative": "我前几天参加了一次访谈，和小灵聊了我做茶叶、两个孩子、一次感情清零的经历。",
+        "follow_up_questions": {
+            "relation_core.attachment_style": ["你在亲密关系中如何表达脆弱？"],
+        },
+    }
+    import json as _json
+    return _json.dumps(seed, ensure_ascii=False)
+
+
+def _fake_l1_response() -> str:
+    events = [
+        {
+            "actor": "Jacky",
+            "action": "30 岁左右从零售转到接手家里的茶叶",
+            "context": "组建家庭后权衡时间与收入",
+            "outcome": "慢慢接手了茶叶生意",
+            "scene_location": "合肥", "scene_atmosphere": "平静",
+            "scene_sensory_notes": "", "scene_subjective_experience": "水到渠成",
+            "emotion": "笃定", "emotion_intensity": 0.4,
+            "importance": 0.6, "emotion_intensity_score": 0.4,
+            "value_relevance_score": 0.7, "novelty_score": 0.6,
+            "reusability_score": 0.6,
+            "tags_time_year": 2014, "tags_time_month": 6,
+            "tags_time_week": 0, "tags_time_period_label": "30 岁左右",
+            "tags_people": ["伴侣"], "tags_topic": ["职业"],
+            "tags_emotion_valence": "中性", "tags_emotion_label": "笃定",
+            "inferred_timestamp": "2014-06-01T00:00:00",
+            "raw_quote": "大概是30岁左右的时候，慢慢接手的",
+            "event_kind": "biography",
+        }
+    ]
+    import json as _json
+    return _json.dumps(events, ensure_ascii=False)
+
+
+def test_build_from_interview_smoke(tmp_path, monkeypatch):
+    md = _SAMPLE_MD
+    md_path = tmp_path / "jacky-interview-abc12345-2026-04-15.md"
+    md_path.write_text(md, encoding="utf-8")
+
+    monkeypatch.setattr(isb, "_AGENTS_DIR", tmp_path / "agents")
+    monkeypatch.setattr(isb, "_SEEDS_DIR",  tmp_path / "seeds")
+    from core import seed_memory_loader as sml
+    monkeypatch.setattr(sml, "_AGENTS_DIR", tmp_path / "agents")
+    monkeypatch.setattr(sml, "_SEEDS_DIR",  tmp_path / "seeds")
+    from core import soul as soul_mod
+    monkeypatch.setattr(soul_mod, "_AGENTS_DIR", tmp_path / "agents")
+    from core import memory_l1
+    monkeypatch.setattr(memory_l1, "_AGENTS_DIR", tmp_path / "agents")
+    from core import memory_l2
+    monkeypatch.setattr(memory_l2, "_AGENTS_DIR", tmp_path / "agents")
+    from core import global_state
+    monkeypatch.setattr(global_state, "_AGENTS_DIR", tmp_path / "agents")
+
+    call_log = []
+    def fake_chat(messages, max_tokens=1024, temperature=0.7):
+        call_log.append(messages)
+        if len(call_log) == 1:
+            return _fake_seed_response()
+        if len(call_log) == 2:
+            return _fake_l1_response()
+        return '{"action": "skip"}'
+
+    monkeypatch.setattr(isb, "chat_completion", fake_chat)
+    monkeypatch.setattr(memory_l2, "chat_completion", fake_chat)
+    monkeypatch.setattr(isb, "get_embedding", lambda t: [0.0] * __import__("config").EMBEDDING_DIM)
+    monkeypatch.setattr(sml, "get_embedding", lambda t: [0.0] * __import__("config").EMBEDDING_DIM)
+
+    summary = isb.build_from_interview(str(md_path))
+
+    agent_id = "jacky"
+    seeds_dir   = tmp_path / "seeds" / agent_id
+    agents_dir  = tmp_path / "agents" / agent_id
+
+    assert (seeds_dir / "seed.json").exists()
+    assert (seeds_dir / "interview_source" / md_path.name).exists()
+    assert (seeds_dir / "build_report.md").exists()
+
+    assert (agents_dir / "soul.json").exists()
+    assert (agents_dir / "l0_buffer.json").exists()
+    assert (agents_dir / "l2_patterns.json").exists()
+    assert (agents_dir / "global_state.json").exists()
+
+    soul = json.loads((agents_dir / "soul.json").read_text(encoding="utf-8"))
+    assert soul["emotion_core"]["constitutional"]["base_emotional_type"] == "内敛"
+    assert soul["relation_core"]["constitutional"]["attachment_style"] is None
+
+    l0 = json.loads((agents_dir / "l0_buffer.json").read_text(encoding="utf-8"))
+    assert l0["working_context"].get("recent_self_narrative")
+    assert "访谈" in l0["working_context"]["recent_self_narrative"]
+
+    seed = json.loads((seeds_dir / "seed.json").read_text(encoding="utf-8"))
+    assert seed["relation_core"]["attachment_style"]["confidence"] == 0.4
+
+    assert summary["agent_id"] == agent_id
+    assert summary["biography_count"] == 1
+    assert summary["meta_count"] == 1

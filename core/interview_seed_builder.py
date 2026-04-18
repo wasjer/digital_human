@@ -465,3 +465,170 @@ def _write_build_report(out_path: str, parsed: dict, raw_seed: dict, stats: dict
 
     Path(out_path).write_text("\n".join(lines), encoding="utf-8")
     logger.info(f"_write_build_report written to {out_path}")
+
+
+from core.seed_memory_loader import (
+    _setup_agent_dirs,
+    _write_events_to_l1,
+    _build_graph,
+    _update_statuses,
+)
+from core.memory_l2 import check_and_generate_patterns, contribute_to_soul
+
+
+def _write_seed_audit(seed_dir: Path, raw_seed: dict) -> None:
+    seed_dir.mkdir(parents=True, exist_ok=True)
+    with open(seed_dir / "seed.json", "w", encoding="utf-8") as f:
+        json.dump(raw_seed, f, ensure_ascii=False, indent=2)
+
+
+def _inject_l0_narrative(agent_id: str, narrative: str) -> None:
+    """把 recent_self_narrative 写进 l0_buffer.working_context；raw_dialogue 不塞。"""
+    l0_path = _AGENTS_DIR / agent_id / "l0_buffer.json"
+    data = json.loads(l0_path.read_text(encoding="utf-8"))
+    data.setdefault("working_context", {})
+    data["working_context"]["recent_self_narrative"] = narrative or ""
+    l0_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _compute_topic_dist(events: list[dict]) -> dict[str, int]:
+    counter: dict[str, int] = {}
+    for ev in events:
+        for t in ev.get("tags_topic") or []:
+            counter[str(t)] = counter.get(str(t), 0) + 1
+    return counter
+
+
+def build_from_interview(
+    md_path: str,
+    agent_id_override: str | None = None,
+    force: bool = False,
+) -> dict:
+    """
+    从访谈 md 一键构建 agent。参见 spec §2 架构图。
+    """
+    start = datetime.now()
+
+    logger.info(f"Step 1/11: parse interview md path={md_path}")
+    parsed = _parse_interview_md(md_path)
+    if agent_id_override:
+        parsed["agent_id"] = agent_id_override
+    agent_id = parsed["agent_id"]
+
+    agent_dir = _AGENTS_DIR / agent_id
+    seed_dir  = _SEEDS_DIR / agent_id
+    if agent_dir.exists() or seed_dir.exists():
+        if not force:
+            raise RuntimeError(
+                f"agent_id='{agent_id}' 已存在。如需重建请加 --force。"
+            )
+        logger.warning(f"build_from_interview force=True 删除旧数据 agent_id={agent_id}")
+        if agent_dir.exists():
+            shutil.rmtree(agent_dir)
+        if seed_dir.exists():
+            shutil.rmtree(seed_dir)
+
+    logger.info(f"build_from_interview START agent_id={agent_id}")
+
+    logger.info("Step 3/11: archive source md")
+    seed_dir.mkdir(parents=True, exist_ok=True)
+    archive_dir = seed_dir / "interview_source"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(md_path, archive_dir / Path(md_path).name)
+    parsed["source_md_rel"] = f"interview_source/{Path(md_path).name}"
+
+    logger.info("Step 4/11: LLM pass 1 — interview → seed (with confidence)")
+    raw_seed = _call_llm_for_seed(parsed)
+
+    _write_seed_audit(seed_dir, raw_seed)
+
+    logger.info("Step 5/11: confidence gate → soul.json")
+    soul = _build_soul_from_gated_seed(agent_id, raw_seed)
+    _write_soul(agent_id, soul)
+
+    agent_name_field = raw_seed.get("name") or {}
+    agent_name = agent_name_field.get("value") if isinstance(agent_name_field, dict) else None
+    agent_name = agent_name or agent_id
+    age_field  = raw_seed.get("age") or {}
+    current_age = age_field.get("value") if isinstance(age_field, dict) else None
+    if not isinstance(current_age, int):
+        current_age = 0
+
+    logger.info("Step 6/11: setup agent dirs + inject L0 recent_self_narrative")
+    _setup_agent_dirs(agent_id)
+    _inject_l0_narrative(agent_id, raw_seed.get("recent_self_narrative") or "")
+
+    logger.info("Step 7/11: LLM pass 2 — interview → biography L1 events")
+    biography_events = _call_llm_for_l1_events(parsed, agent_name, current_age)
+
+    logger.info("Step 8/11: build deterministic meta event")
+    meta_event = _build_meta_event(parsed, agent_name)
+    all_events = biography_events + [meta_event]
+
+    logger.info(f"Step 9/11: write {len(all_events)} events to L1 + graph + statuses")
+    written = _write_events_to_l1(agent_id, agent_name, all_events)
+    _build_graph(agent_id, written)
+    status_dist = _update_statuses(agent_id, written)
+
+    logger.info("Step 10/11: L2 patterns (include_all_statuses=True) + soul contributions")
+    l2_updated = check_and_generate_patterns(agent_id, include_all_statuses=True)
+    soul_contribs = contribute_to_soul(agent_id)
+
+    logger.info("Step 11/11: write build_report.md")
+    elapsed = (datetime.now() - start).seconds
+    stats = {
+        "elapsed_seconds":    elapsed,
+        "biography_count":    len(biography_events),
+        "meta_count":         1,
+        "status_dist":        status_dist,
+        "l2_pattern_count":   len(l2_updated),
+        "soul_contributions": len(soul_contribs),
+        "topic_dist":         _compute_topic_dist(biography_events + [meta_event]),
+    }
+    _write_build_report(str(seed_dir / "build_report.md"), parsed, raw_seed, stats)
+
+    summary = {
+        "agent_id":          agent_id,
+        "agent_name":        agent_name,
+        "biography_count":   len(biography_events),
+        "meta_count":        1,
+        "l2_pattern_count":  len(l2_updated),
+        "soul_contributions":len(soul_contribs),
+        "elapsed_seconds":   elapsed,
+    }
+    logger.info(f"build_from_interview DONE summary={summary}")
+    print("\n=== interview agent 构建完成 ===")
+    print(f"  Agent:        {agent_id} ({agent_name})")
+    print(f"  L1 事件:      {len(biography_events)} biography + {1} meta = {len(biography_events)+1} 条  {status_dist}")
+    print(f"  L2 patterns:  {len(l2_updated)} 条")
+    print(f"  报告:         data/seeds/{agent_id}/build_report.md")
+    print(f"  耗时:         {elapsed}s")
+    return summary
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="从访谈 md 构建数字人 agent（带 confidence 门控和审计报告）",
+    )
+    parser.add_argument("md_path", help="interview_source/ 下的 md 文件路径")
+    parser.add_argument("--agent-id",
+                        dest="agent_id_override",
+                        default=None,
+                        help="文件名推导失败时的后门参数")
+    parser.add_argument("--force", "-f", action="store_true", help="覆盖重建")
+    args = parser.parse_args()
+
+    if not Path(args.md_path).exists():
+        print(f"错误：找不到文件 {args.md_path}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        build_from_interview(
+            md_path=args.md_path,
+            agent_id_override=args.agent_id_override,
+            force=args.force,
+        )
+    except (RuntimeError, ValueError) as e:
+        print(f"错误：{e}", file=sys.stderr)
+        sys.exit(1)
