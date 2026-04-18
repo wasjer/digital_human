@@ -142,3 +142,84 @@ def _parse_interview_md(md_path: str) -> dict:
         "interviewer_name":      interviewer_name,
         "dialogue_text":         body.strip(),
     }
+
+
+def _gate(node, threshold: float | None = None):
+    """
+    LLM 输出 {"value": ..., "confidence": ...} → 过阈值则原值，否则 None。
+
+    - value 为 None 时一律 None（无论 confidence 多高）
+    - confidence 非数字 / 缺失 一律视作 0
+    """
+    if threshold is None:
+        threshold = config.INTERVIEW_CONFIDENCE_THRESHOLD
+    if not isinstance(node, dict):
+        return None
+    value = node.get("value")
+    if value is None:
+        return None
+    conf = node.get("confidence")
+    if not isinstance(conf, (int, float)):
+        return None
+    return value if conf >= threshold else None
+
+
+def _year_from_iso(ts: str) -> int:
+    try:
+        return int(ts[:4])
+    except Exception:
+        return datetime.now().year
+
+
+def _month_from_iso(ts: str) -> int:
+    try:
+        return int(ts[5:7])
+    except Exception:
+        return 0
+
+
+def _build_meta_event(parsed: dict, agent_name: str) -> dict:
+    """
+    用访谈 frontmatter 确定性构造一条 L1 meta 事件（无 LLM）。
+    该事件让 agent "知道"自己是通过一次访谈被唤醒的，利于连续性叙事。
+    """
+    duration = parsed.get("duration_minutes") or 0
+    modules  = parsed.get("modules_completed") or []
+    titles   = parsed.get("module_titles") or {}
+    interviewer = parsed.get("interviewer_name") or "访谈员"
+
+    ordered_titles = [
+        titles.get(mod_id) or f"模块 {mod_id}"
+        for mod_id in modules
+    ]
+    modules_text = "、".join(ordered_titles) if ordered_titles else "多个话题"
+
+    return {
+        "actor":              agent_name,
+        "action":             "参加了一次关于人生经历的深度访谈",
+        "context":            f"在一个对话式访谈系统里和访谈员'{interviewer}'聊了约 {duration} 分钟",
+        "outcome":            f"按顺序聊了 {len(modules)} 个模块：{modules_text}",
+        "scene_location":     "家中/线上对话",
+        "scene_atmosphere":   "安静、回顾式",
+        "scene_sensory_notes":"",
+        "scene_subjective_experience": "一次难得的对自己经历的系统梳理",
+        "emotion":            "平静、略带回顾感",
+        "emotion_intensity":  0.3,
+        "importance":         0.6,
+        "emotion_intensity_score": 0.3,
+        "value_relevance_score":   0.5,
+        "novelty_score":           0.7,
+        "reusability_score":       0.4,
+        "tags_time_year":     _year_from_iso(parsed.get("completed_at", "")),
+        "tags_time_month":    _month_from_iso(parsed.get("completed_at", "")),
+        "tags_time_week":     0,
+        "tags_time_period_label": "近期",
+        "tags_people":            [interviewer],
+        "tags_topic":             ["访谈", "自我叙述"],
+        "tags_emotion_valence":   "中性",
+        "tags_emotion_label":     "回顾",
+        "inferred_timestamp":     parsed.get("completed_at", ""),
+        "raw_quote":              None,
+        "event_kind":             "meta",
+        "source":                 "interview_meta",
+    }
