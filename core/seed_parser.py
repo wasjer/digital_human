@@ -3,6 +3,7 @@ import logging
 import re
 from pathlib import Path
 
+import config
 from core.llm_client import chat_completion
 
 logger = logging.getLogger("llm_client")
@@ -101,7 +102,7 @@ def parse_seed(nodes_json_path: str, agent_id: str) -> dict:
             "content": _USER_PROMPT_TEMPLATE.format(name=agent_id, dialogue=dialogue),
         },
     ]
-    raw = chat_completion(messages, max_tokens=1024, temperature=0.2)
+    raw = chat_completion(messages, max_tokens=config.LLM_MAX_OUTPUT_TOKENS, temperature=0.2)
 
     # 4. 解析 JSON
     try:

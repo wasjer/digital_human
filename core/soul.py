@@ -186,7 +186,7 @@ def init_soul(agent_id: str) -> dict:
             seed_json=json.dumps(seed, ensure_ascii=False, indent=2)
         )},
     ]
-    raw = chat_completion(messages, max_tokens=2048, temperature=0.2)
+    raw = chat_completion(messages, max_tokens=config.LLM_MAX_OUTPUT_TOKENS, temperature=0.2)
 
     try:
         llm_data = json.loads(_strip_json(raw))
