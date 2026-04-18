@@ -17,6 +17,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger("llm_client")
 
+
+# ── 响应清洗 ────────────────────────────────────────────────────────────────
+
+class EmptyResponseError(RuntimeError):
+    """LLM 返回空字符串或纯空白。"""
+
+
+def _sanitize(raw: str) -> str:
+    raise NotImplementedError
+
+
 # ── Provider 路由 ────────────────────────────────────────────────────────────
 
 _PROVIDER_ENV_KEYS = {
