@@ -49,8 +49,8 @@ _AGENTS_DIR   = _PROJECT_ROOT / "data" / "agents"
 _SEEDS_DIR    = _PROJECT_ROOT / "data" / "seeds"
 _PROMPTS_DIR  = _PROJECT_ROOT / "prompts"
 
-_INIT_MAX_TOKENS  = 8192
-_BATCH_MAX_TOKENS = 8192
+_INIT_MAX_TOKENS  = config.LLM_MAX_OUTPUT_TOKENS
+_BATCH_MAX_TOKENS = config.LLM_MAX_OUTPUT_TOKENS
 
 _CURRENT_YEAR = 2026   # nuwa agent 的"现在"锚点，spec §2.5
 

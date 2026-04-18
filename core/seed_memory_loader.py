@@ -56,9 +56,9 @@ _AGENTS_DIR   = _PROJECT_ROOT / "data" / "agents"
 _SEEDS_DIR    = _PROJECT_ROOT / "data" / "seeds"
 _PROMPTS_DIR  = _PROJECT_ROOT / "prompts"
 
-# 初始化特殊通道：不限 token
-_INIT_MAX_TOKENS  = 8192
-_BATCH_MAX_TOKENS = 8192
+# 初始化特殊通道：用 config 上限（LLM 输出硬限，换模型时一处改）
+_INIT_MAX_TOKENS  = config.LLM_MAX_OUTPUT_TOKENS
+_BATCH_MAX_TOKENS = config.LLM_MAX_OUTPUT_TOKENS
 _BATCH_NODE_SIZE  = 30   # 单次 LLM 调用最多处理的节点数
 
 # 状态分配阈值（距今天数）
