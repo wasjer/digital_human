@@ -69,3 +69,9 @@ L1_MAX_ACTIVE = 2000      # L1 最多保留的 active 事件数
 L2_MAX_PATTERNS = 200     # L2 最多保留的 active 规律数
 
 LOG_LEVEL = "INFO"
+
+# LLM 输出上限（当前 DeepSeek-chat 硬限 8192；换模型时一处改）
+LLM_MAX_OUTPUT_TOKENS = 8192
+
+# 访谈通路：字段 confidence 低于此值不写入 soul.json（进"回访建议"）
+INTERVIEW_CONFIDENCE_THRESHOLD = 0.5
