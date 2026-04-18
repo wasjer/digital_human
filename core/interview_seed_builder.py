@@ -27,6 +27,8 @@ import shutil
 from datetime import datetime
 
 import config
+from core.llm_client import chat_completion, get_embedding
+from core.soul import _build_empty_soul, _write_soul, _CORE_FIELDS, CORES
 
 logger = logging.getLogger("interview_seed_builder")
 
@@ -223,3 +225,108 @@ def _build_meta_event(parsed: dict, agent_name: str) -> dict:
         "event_kind":             "meta",
         "source":                 "interview_meta",
     }
+
+
+def _strip_json(text: str) -> str:
+    text = text.strip()
+    m = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text, re.DOTALL)
+    return m.group(1) if m else text
+
+
+def _load_prompt(filename: str) -> str:
+    return (_PROMPTS_DIR / filename).read_text(encoding="utf-8")
+
+
+def _call_llm_for_seed(parsed: dict) -> dict:
+    """LLM pass 1: 访谈 → 带 confidence 的结构化 seed + recent_self_narrative + follow_up_questions。"""
+    template = _load_prompt("interview_to_seed.txt")
+    user = template.format(
+        agent_id         = parsed["agent_id"],
+        interview_date   = parsed["completed_at"],
+        duration_minutes = parsed["duration_minutes"],
+        dialogue_text    = parsed["dialogue_text"],
+    )
+    raw = chat_completion(
+        [{"role": "user", "content": user}],
+        max_tokens=config.LLM_MAX_OUTPUT_TOKENS,
+        temperature=0.2,
+    )
+    try:
+        data = json.loads(_strip_json(raw))
+    except json.JSONDecodeError as e:
+        logger.error(f"_call_llm_for_seed json parse error={e} raw={raw[:400]}")
+        raise
+    if not isinstance(data, dict):
+        raise ValueError(f"_call_llm_for_seed expected dict, got {type(data)}")
+    return data
+
+
+def _call_llm_for_l1_events(parsed: dict, agent_name: str, current_age: int) -> list[dict]:
+    """LLM pass 2: 访谈 → biography L1 事件列表。"""
+    template = _load_prompt("interview_to_l1.txt")
+    user = template.format(
+        agent_name     = agent_name,
+        interview_date = parsed["completed_at"],
+        current_age    = current_age,
+        dialogue_text  = parsed["dialogue_text"],
+    )
+    raw = chat_completion(
+        [{"role": "user", "content": user}],
+        max_tokens=config.LLM_MAX_OUTPUT_TOKENS,
+        temperature=0.2,
+    )
+    try:
+        events = json.loads(_strip_json(raw))
+    except json.JSONDecodeError as e:
+        logger.error(f"_call_llm_for_l1_events json parse error={e} raw={raw[:400]}")
+        raise
+    if not isinstance(events, list):
+        raise ValueError(f"_call_llm_for_l1_events expected list, got {type(events)}")
+    for ev in events:
+        ev.setdefault("source", "interview")
+        ev.setdefault("event_kind", "biography")
+    return events
+
+
+def _build_soul_from_gated_seed(agent_id: str, raw_seed: dict) -> dict:
+    """
+    raw_seed 是 LLM pass 1 的原始输出（带 confidence）。
+    按 _CORE_FIELDS 映射到 soul 三区，confidence < threshold 的字段 → None。
+    返回构造好的 soul dict（未写盘）。
+    """
+    soul = _build_empty_soul(agent_id)
+
+    for core in ["emotion_core", "value_core", "goal_core", "relation_core"]:
+        raw_core = raw_seed.get(core) or {}
+        sc       = soul[core]
+        fields   = _CORE_FIELDS[core]
+
+        for f in fields["constitutional"]:
+            sc["constitutional"][f] = _gate(raw_core.get(f))
+        main_const_field = fields["constitutional"][0] if fields["constitutional"] else None
+        if main_const_field:
+            raw_field = raw_core.get(main_const_field) or {}
+            sc["constitutional"]["confidence"] = raw_field.get("confidence") if isinstance(raw_field, dict) else None
+        sc["constitutional"]["source"] = "interview"
+
+        for f in fields["slow_change"]:
+            sc["slow_change"][f]["value"] = _gate(raw_core.get(f))
+
+        for f in fields["elastic"]:
+            sc["elastic"][f] = _gate(raw_core.get(f))
+
+    cog_raw   = raw_seed.get("cognitive_core") or {}
+    cog_const = soul["cognitive_core"]["constitutional"]
+    conf_detail: dict = {}
+    for f in _CORE_FIELDS["cognitive_core"]["constitutional"]:
+        raw_field = cog_raw.get(f)
+        cog_const[f] = _gate(raw_field)
+        if isinstance(raw_field, dict) and isinstance(raw_field.get("confidence"), (int, float)):
+            conf_detail[f] = raw_field["confidence"]
+        else:
+            conf_detail[f] = None
+    cog_const["confidence"] = None
+    cog_const["confidence_detail"] = conf_detail
+    cog_const["source"] = "interview"
+
+    return soul

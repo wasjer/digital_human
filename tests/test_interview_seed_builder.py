@@ -180,3 +180,70 @@ def test_build_meta_event_missing_titles_falls_back_to_number():
     event = isb._build_meta_event(parsed, agent_name="Jacky")
     assert "开场" in event["outcome"]
     assert "模块 99" in event["outcome"]
+
+
+def test_build_soul_from_gated_seed_fills_above_threshold_only(tmp_path, monkeypatch):
+    from core import soul as soul_mod
+    monkeypatch.setattr(soul_mod, "_AGENTS_DIR", tmp_path / "agents")
+
+    raw_seed = {
+        "name":       {"value": "Jacky", "confidence": 0.95},
+        "age":        {"value": 42,       "confidence": 0.99},
+        "occupation": {"value": "茶叶",   "confidence": 0.98},
+        "location":   {"value": "合肥",   "confidence": 0.99},
+        "emotion_core": {
+            "base_emotional_type":        {"value": "内敛", "confidence": 0.8},
+            "emotional_regulation_style": {"value": "散步", "confidence": 0.4},
+            "current_emotional_state":    {"value": "放松", "confidence": 0.7},
+        },
+        "value_core": {
+            "moral_baseline":       {"value": "真实", "confidence": 0.6},
+            "value_priority_order": {"value": "家庭", "confidence": 0.3},
+            "current_value_focus":  {"value": "孩子", "confidence": 0.8},
+        },
+        "goal_core": {
+            "life_direction":     {"value": "慢生活",  "confidence": 0.7},
+            "mid_term_goals":     {"value": "带娃旅行", "confidence": 0.6},
+            "current_phase_goal": {"value": "休假",    "confidence": 0.2},
+        },
+        "relation_core": {
+            "attachment_style":       {"value": "独立", "confidence": 0.4},
+            "key_relationships":      {"value": ["伴侣","孩子"], "confidence": 0.9},
+            "current_relation_state": {"value": "稳定", "confidence": 0.7},
+        },
+        "cognitive_core": {
+            "mental_models":        {"value": [{"name":"m","one_liner":"x"}], "confidence": 0.55},
+            "decision_heuristics":  {"value": [{"rule":"稳"}], "confidence": 0.35},
+            "expression_dna":       {"value": "冷静务实", "confidence": 0.75},
+            "expression_exemplars": {"value": ["原句"]*10, "confidence": 0.95},
+            "anti_patterns":        {"value": ["冲动"], "confidence": 0.40},
+            "self_awareness":       {"value": "中庸实用主义", "confidence": 0.80},
+            "honest_boundaries":    {"value": "保留", "confidence": 0.35},
+        },
+    }
+
+    soul = isb._build_soul_from_gated_seed("txf", raw_seed)
+
+    assert soul["emotion_core"]["constitutional"]["base_emotional_type"] == "内敛"
+    assert soul["emotion_core"]["elastic"]["current_emotional_state"] == "放松"
+    assert soul["value_core"]["elastic"]["current_value_focus"] == "孩子"
+    assert soul["goal_core"]["slow_change"]["mid_term_goals"]["value"] == "带娃旅行"
+    assert soul["emotion_core"]["slow_change"]["emotional_regulation_style"]["value"] is None
+    assert soul["value_core"]["slow_change"]["value_priority_order"]["value"] is None
+    assert soul["goal_core"]["elastic"]["current_phase_goal"] is None
+    assert soul["relation_core"]["constitutional"]["attachment_style"] is None
+
+    cog = soul["cognitive_core"]["constitutional"]
+    assert cog["mental_models"] == [{"name":"m","one_liner":"x"}]
+    assert cog["decision_heuristics"] is None
+    assert cog["expression_dna"] == "冷静务实"
+    assert cog["expression_exemplars"] == ["原句"]*10
+    assert cog["anti_patterns"] is None
+    assert cog["self_awareness"] == "中庸实用主义"
+    assert cog["honest_boundaries"] is None
+
+    assert soul["emotion_core"]["constitutional"]["source"] == "interview"
+
+    assert "confidence_detail" in cog
+    assert cog["confidence_detail"]["expression_exemplars"] == 0.95
+    assert cog["confidence_detail"]["decision_heuristics"] == 0.35
