@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 import logging
@@ -20,12 +21,39 @@ logger = logging.getLogger("llm_client")
 
 # ── 响应清洗 ────────────────────────────────────────────────────────────────
 
+_THINK_CLOSED_RE = re.compile(r"<think>[\s\S]*?</think>", re.DOTALL)
+_THINK_OPEN_ONLY_RE = re.compile(r"<think>[\s\S]*?(?=[\{\[])", re.DOTALL)
+_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]+?)\s*```", re.DOTALL)
+
+
 class EmptyResponseError(RuntimeError):
     """LLM 返回空字符串或纯空白。"""
 
 
 def _sanitize(raw: str) -> str:
-    raise NotImplementedError
+    """把 LLM 返回内容里 provider 相关的包裹去掉，返回可直接 json.loads 的字符串。
+    对非 JSON 的纯文本返回（如情绪打分、对话回复）也安全——只是原样 trim。"""
+    if raw is None:
+        raise EmptyResponseError("LLM returned None")
+    text = raw.strip()
+    if not text:
+        raise EmptyResponseError("LLM returned empty string")
+
+    # 1. 去闭合的 <think>…</think>
+    text = _THINK_CLOSED_RE.sub("", text).strip()
+
+    # 2. 去未闭合 <think>（截断场景）：从 <think> 到首个 { 或 [ 之前删掉
+    if text.startswith("<think>") and "</think>" not in text:
+        text = _THINK_OPEN_ONLY_RE.sub("", text, count=1).strip()
+
+    # 3. 去 ```json … ``` 围栏
+    m = _FENCE_RE.search(text)
+    if m:
+        text = m.group(1).strip()
+
+    if not text:
+        raise EmptyResponseError("LLM content empty after sanitize")
+    return text
 
 
 # ── Provider 路由 ────────────────────────────────────────────────────────────
