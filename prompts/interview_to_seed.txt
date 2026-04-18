@@ -1,0 +1,83 @@
+你是一个深度人格建模专家。你将读取一段访谈对话（访谈员与受访者的完整 Q&A），为受访者提取结构化人格信息，每个字段带 confidence。
+
+## 任务目标
+
+1. 提取受访者的基础身份（name/age/occupation/location）
+2. 提取五大核心（emotion/value/goal/relation/cognitive），每个核心覆盖 constitutional（天性底色）/ slow_change（长期偏好）/ elastic（当下状态）三区
+3. 为每个可推断字段输出 `{{"value": ..., "confidence": 0~1}}`
+4. 额外产出：`recent_self_narrative`（第一人称 200~400 字摘要，供 L0 注入）
+5. 额外产出：`follow_up_questions`（对 confidence < 0.5 的字段给出下一轮访谈的建议追问）
+
+## 绝对规则
+
+1. **禁止用常识/刻板印象补空**。只允许用访谈中明确出现或强证据可推断的信息。
+2. confidence 标定：
+   - ≥ 0.7：访谈中有 ≥ 2 处一致证据
+   - 0.5~0.7：有 1 处较明确的证据
+   - < 0.5：仅凭语气/态度揣测，或孤证
+   - 0.0：无任何线索
+3. 没线索的字段必须输出 `{{"value": null, "confidence": 0.0}}`，**绝对不允许留空键**。
+4. `expression_exemplars` 必须逐字抄 10 条受访者原句（完整句子，不是片段，不改写）。若访谈过短无法抄满 10 条，抄多少条就是多少，confidence 降到 0.6。
+5. `recent_self_narrative` 是第一人称叙述（"我前几天参加了一次访谈…我聊到…"），不是第三人称总结。描述这次访谈聊了什么、我讲了哪些关键自述。200~400 字。
+6. `follow_up_questions` 以 dict 形式给出，键为 `"<core>.<field>"`（如 `"relation_core.attachment_style"`），值为 1-2 条具体的追问文字的 list。**只列 confidence < 0.5 的字段**，confidence ≥ 0.5 的字段不要出现在这个 dict 里。
+7. 只输出 JSON，不加任何解释或 markdown 代码块。
+8. 所有字段值使用中文。
+
+---
+
+访谈基本信息：
+- agent_id：{agent_id}
+- 访谈时间：{interview_date}
+- 访谈时长：{duration_minutes} 分钟
+
+访谈全文：
+{dialogue_text}
+
+请输出以下 JSON 结构：
+
+{{
+  "name":       {{"value": "...", "confidence": 0.0}},
+  "age":        {{"value": 0,     "confidence": 0.0}},
+  "occupation": {{"value": "...", "confidence": 0.0}},
+  "location":   {{"value": "...", "confidence": 0.0}},
+
+  "emotion_core": {{
+    "base_emotional_type":        {{"value": "对天生情感特质的描述（感知方式、共情模式、情绪底色）", "confidence": 0.0}},
+    "emotional_regulation_style": {{"value": "长期形成的情绪处理调节方式", "confidence": 0.0}},
+    "current_emotional_state":    {{"value": "当前情绪状态", "confidence": 0.0}}
+  }},
+
+  "value_core": {{
+    "moral_baseline":       {{"value": "最深层的道德底线和核心价值观", "confidence": 0.0}},
+    "value_priority_order": {{"value": "长期形成的价值优先级排序", "confidence": 0.0}},
+    "current_value_focus":  {{"value": "当前最关注的价值方向", "confidence": 0.0}}
+  }},
+
+  "goal_core": {{
+    "life_direction":     {{"value": "内心最根本的人生方向感", "confidence": 0.0}},
+    "mid_term_goals":     {{"value": "当前阶段（近几年）的中期目标", "confidence": 0.0}},
+    "current_phase_goal": {{"value": "当下最具体、最紧迫的阶段性目标", "confidence": 0.0}}
+  }},
+
+  "relation_core": {{
+    "attachment_style":       {{"value": "依恋风格和人际关系基本模式", "confidence": 0.0}},
+    "key_relationships":      {{"value": ["最重要的关系列表（可以是字符串或结构化描述）"], "confidence": 0.0}},
+    "current_relation_state": {{"value": "当前主要人际关系状态", "confidence": 0.0}}
+  }},
+
+  "cognitive_core": {{
+    "mental_models":        {{"value": [{{"name": "模型名", "one_liner": "一句话描述"}}], "confidence": 0.0}},
+    "decision_heuristics":  {{"value": [{{"rule": "决策启发式规则"}}], "confidence": 0.0}},
+    "expression_dna":       {{"value": "说话风格的一句话提炼", "confidence": 0.0}},
+    "expression_exemplars": {{"value": ["受访者原句1", "受访者原句2", "...共10条"], "confidence": 0.0}},
+    "anti_patterns":        {{"value": ["绝不会做的事1", "..."], "confidence": 0.0}},
+    "self_awareness":       {{"value": "自我认知描述", "confidence": 0.0}},
+    "honest_boundaries":    {{"value": "诚实坦诚的边界描述", "confidence": 0.0}}
+  }},
+
+  "recent_self_narrative": "第一人称 200~400 字摘要，讲述这次访谈聊了什么、我讲了哪些关键自述",
+
+  "follow_up_questions": {{
+    "relation_core.attachment_style": ["建议追问 1", "建议追问 2"]
+  }}
+}}
