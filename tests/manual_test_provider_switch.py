@@ -89,12 +89,10 @@ def _smoke_dialogue_reply():
 # 3. dialogue.make_decision
 # decision_system.txt 有大量占位符（name/age/occupation 等），用内联 system prompt 代替
 def _smoke_make_decision():
-    sys_prompt = (
-        "你是一个决策助手。根据情境做出判断，输出 JSON。"
-    )
+    sys_prompt = "你是一个决策助手。根据用户描述的情况，输出 JSON：{\"decision\": str, \"reasoning\": str}。只输出 JSON，不要任何其他内容。"
     return chat_completion(
         [{"role": "system", "content": sys_prompt},
-         {"role": "user", "content": "现在要不要接受这份 offer？只返回 JSON：{\"decision\": \"接受\", \"reasoning\": \"待遇好，符合方向\"}"}],
+         {"role": "user", "content": "我收到一个创业公司的 offer，待遇比现在好 30%，但要搬到另一个城市。要不要接受？"}],
         max_tokens=256, temperature=0.2,
     )
 
@@ -224,45 +222,41 @@ def _smoke_l1_tags():
 
 
 # 12. seed_memory_loader init_soul_from_nodes
-# seed_soul_init.txt 使用 {seed_json} + {nodes_text}
+# seed_soul_init.txt 使用 \n---\n 分隔 system/user；{seed_json} + {nodes_text}
 def _smoke_seed_init_soul():
-    sys_prompt = _load_single_prompt("seed_soul_init.txt")
+    sys_, usr_tmpl = _load_prompt_pair("seed_soul_init.txt")
     seed_json = '{"name": "测试用户", "age": 30, "occupation": "工程师", "location": "北京"}'
     nodes_text = "访谈节点1：喜欢独处\n访谈节点2：偏好书写表达\n访谈节点3：工作里追求精确"
-    user = sys_prompt.format(seed_json=seed_json, nodes_text=nodes_text)
+    user = usr_tmpl.format(seed_json=seed_json, nodes_text=nodes_text)
     return chat_completion(
-        [{"role": "user", "content": user}],
-        max_tokens=1024, temperature=0.2,
+        [{"role": "system", "content": sys_}, {"role": "user", "content": user}],
+        max_tokens=2048, temperature=0.2,
     )
 
 
 # 13. seed_memory_loader extract_events_batch
-# seed_batch_load.txt 使用 {agent_name}, {current_year}, {nodes_text}
+# seed_batch_load.txt 使用 \n---\n 分隔 system/user；{agent_name}, {current_year}, {nodes_text}
 def _smoke_seed_batch():
-    sys_prompt = _load_single_prompt("seed_batch_load.txt")
-    nodes_text = "节点1：2019 年搬去北京\n节点2：2020 年换了工作\n节点3：2022 年结婚"
-    user = sys_prompt.format(
+    sys_, usr_tmpl = _load_prompt_pair("seed_batch_load.txt")
+    user = usr_tmpl.format(
         agent_name="测试用户",
-        current_year=2026,
-        nodes_text=nodes_text,
+        current_year="2026",
+        nodes_text="1. 2019 年搬去北京\n2. 2020 年换了工作\n3. 2022 年结婚",
     )
     return chat_completion(
-        [{"role": "user", "content": user}],
+        [{"role": "system", "content": sys_}, {"role": "user", "content": user}],
         max_tokens=2048, temperature=0.2,
     )
 
 
 # 14. soul.init_soul
-# soul_init.txt 使用 {seed_json}
+# soul_init.txt 使用 \n---\n 分隔 system/user；{seed_json}
 def _smoke_soul_init():
-    sys_prompt = _load_single_prompt("soul_init.txt")
-    seed_json = (
-        '{"name": "测试用户", "age": 30, "occupation": "工程师", "location": "北京", '
-        '"personality_traits": ["喜欢独处", "偏好书写表达", "追求精确"]}'
-    )
-    user = sys_prompt.format(seed_json=seed_json)
+    sys_, usr_tmpl = _load_prompt_pair("soul_init.txt")
+    seed_json = '{"name": "测试用户", "age": 30, "occupation": "工程师", "traits": ["喜欢独处", "偏好书写表达", "追求精确"]}'
+    user = usr_tmpl.format(seed_json=seed_json)
     return chat_completion(
-        [{"role": "user", "content": user}],
+        [{"role": "system", "content": sys_}, {"role": "user", "content": user}],
         max_tokens=1024, temperature=0.2,
     )
 
@@ -315,6 +309,27 @@ def _smoke_interview_l1():
     )
 
 
+# 18. seed_parser.parse_seed
+# seed_extract.txt 无 \n---\n 分隔符；_load_prompt_pair 回落为 ("", 全文)，
+# 与 seed_parser.py 中 _load_prompt() 的行为一致（_SYSTEM_PROMPT=""）。
+# 占位符：{name}, {dialogue}
+def _smoke_seed_parse():
+    sys_, usr_tmpl = _load_prompt_pair("seed_extract.txt")
+    user = usr_tmpl.format(
+        name="测试用户",
+        dialogue="A: 今天怎么样？\nB: 还不错，完成了一个项目。",
+    )
+    return chat_completion(
+        [{"role": "system", "content": sys_}, {"role": "user", "content": user}],
+        max_tokens=1024, temperature=0.2,
+    )
+
+
+# 覆盖说明：
+# - 下面 18 条覆盖 core/ 下所有 chat_completion 调用点（含 seed_parser.parse_seed）。
+# - nuwa_seed_builder 的两个调用点（_extract_seed / _extract_events_of_kind）
+#   依赖完整的 SKILL.md 作为 fixture，冒烟不构造；由 interview_seed_builder 的
+#   两个 smoke 作为代理验证 prompt 风格与 JSON 服从度。
 CALL_SITES = [
     {"name": "dialogue._detect_emotion",          "invoke": _smoke_detect_emotion,   "expect": _expect_parseable_float},
     {"name": "dialogue.reply",                    "invoke": _smoke_dialogue_reply,   "expect": _expect_non_empty_string},
@@ -333,6 +348,7 @@ CALL_SITES = [
     {"name": "soul.check_conflict",               "invoke": _smoke_soul_conflict,    "expect": _expect_json_dict},
     {"name": "interview_seed_builder.seed",       "invoke": _smoke_interview_seed,   "expect": _expect_json_dict},
     {"name": "interview_seed_builder.l1_events",  "invoke": _smoke_interview_l1,     "expect": _expect_json_list},
+    {"name": "seed_parser.parse_seed",            "invoke": _smoke_seed_parse,       "expect": _expect_json_dict},
 ]
 
 
