@@ -10,8 +10,8 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_MODEL = "deepseek-chat"
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
-MINIMAX_MODEL = ""
-MINIMAX_BASE_URL = ""
+MINIMAX_MODEL = "minimax-m2.7-highspeed"
+MINIMAX_BASE_URL = "https://api.minimaxi.com/v1"
 
 KIMI_MODEL = ""
 KIMI_BASE_URL = ""

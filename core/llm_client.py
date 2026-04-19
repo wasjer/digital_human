@@ -74,32 +74,45 @@ _PROVIDER_ENV_KEYS = {
 }
 
 
-def _get_chat_client() -> tuple[OpenAI, str, dict]:
-    """根据 LLM_PROVIDER 返回 (OpenAI client, model_name, extra_body)。
-    extra_body 透传到 chat.completions.create；对推理模型用它关掉 thinking，
-    让生产调用点的 max_tokens 预算不被推理吃掉。"""
+def _get_chat_client() -> tuple[OpenAI, str, dict, int]:
+    """根据 LLM_PROVIDER 返回 (OpenAI client, model_name, extra_body, token_multiplier)。
+
+    - extra_body：透传到 chat.completions.create。GLM 用它关 thinking。
+    - token_multiplier：无法关推理的推理模型（如 MiniMax-M2.x 系列）把 max_tokens
+      按调用方写的值直接用，会被推理吃光；此系数在 chat_completion 里把 max_tokens
+      乘进去并 clamp 到 LLM_MAX_OUTPUT_TOKENS，给推理+答案都留出预算。非推理 provider
+      一律为 1，行为与乘前完全一致。
+    """
     provider = getattr(config, "LLM_PROVIDER", "deepseek")
 
     if provider == "deepseek":
         api_key = config.DEEPSEEK_API_KEY or os.environ.get("DEEPSEEK_API_KEY", "")
         if not api_key:
             raise RuntimeError("DEEPSEEK_API_KEY 未配置（config.py 或环境变量）")
-        return OpenAI(api_key=api_key, base_url=config.DEEPSEEK_BASE_URL), config.DEEPSEEK_MODEL, {}
+        return OpenAI(api_key=api_key, base_url=config.DEEPSEEK_BASE_URL), config.DEEPSEEK_MODEL, {}, 1
 
     if provider == "minimax":
         api_key = os.environ.get("MINIMAX_API_KEY", "")
         if not api_key:
             raise RuntimeError("MINIMAX_API_KEY 未配置（环境变量）")
-        # TODO(minimax): 关推理的官方参数待确认。试过 enable_thinking / reasoning_effort /
-        # thinking.type=disabled / no_think / chat_template_kwargs.enable_thinking 等均无效，
-        # reasoning_tokens 仍 >0。暂为空，依赖 _sanitize 剥 <think> 并搭配生产侧 max_tokens。
-        return OpenAI(api_key=api_key, base_url=config.MINIMAX_BASE_URL), config.MINIMAX_MODEL, {}
+        # MiniMax-M2.x 系列是推理模型，官方 API 不提供关推理参数（实测 enable_thinking /
+        # reasoning_effort / thinking.type / no_think / chat_template_kwargs 等均无效）。
+        # <think>…</think> 内联在 content 里由 _sanitize 剥；但 reasoning_tokens 会占
+        # max_tokens 预算——把 max_tokens 乘 16 给推理 + 答案都留空间（实测 ×8 对 base=128
+        # 的结构化 JSON 调用点会截断，~1100 tokens thinking 把 1024 budget 吃光）；
+        # clamp 防超 LLM_MAX_OUTPUT_TOKENS 上限。超时也抬到 180s，推理模型 p99 墙时 >60s。
+        return (
+            OpenAI(api_key=api_key, base_url=config.MINIMAX_BASE_URL, timeout=180.0),
+            config.MINIMAX_MODEL,
+            {},
+            16,
+        )
 
     if provider == "kimi":
         api_key = os.environ.get("KIMI_API_KEY", "")
         if not api_key:
             raise RuntimeError("KIMI_API_KEY 未配置（环境变量）")
-        return OpenAI(api_key=api_key, base_url=config.KIMI_BASE_URL), config.KIMI_MODEL, {}
+        return OpenAI(api_key=api_key, base_url=config.KIMI_BASE_URL), config.KIMI_MODEL, {}, 1
 
     if provider == "glm":
         api_key = os.environ.get("GLM_API_KEY", "")
@@ -111,6 +124,7 @@ def _get_chat_client() -> tuple[OpenAI, str, dict]:
             OpenAI(api_key=api_key, base_url=config.GLM_BASE_URL),
             config.GLM_MODEL,
             {"thinking": {"type": "disabled"}},
+            1,
         )
 
     raise RuntimeError(f"未知 LLM_PROVIDER: {provider!r}，可选: deepseek | minimax | kimi | glm")
@@ -142,11 +156,17 @@ def chat_completion(
     """根据 LLM_PROVIDER 路由调用 chat，返回回复文本。embedding 不受影响。"""
 
     def _call():
-        client, model, extra_body = _get_chat_client()
+        client, model, extra_body, token_mul = _get_chat_client()
+        effective_max = min(max_tokens * token_mul, config.LLM_MAX_OUTPUT_TOKENS)
+        if effective_max != max_tokens:
+            logger.info(
+                f"chat_completion max_tokens={max_tokens}x{token_mul}->{effective_max} "
+                f"(provider reasoning budget)"
+            )
         resp = client.chat.completions.create(
             model=model,
             messages=messages,
-            max_tokens=max_tokens,
+            max_tokens=effective_max,
             temperature=temperature,
             extra_body=extra_body or None,
         )
