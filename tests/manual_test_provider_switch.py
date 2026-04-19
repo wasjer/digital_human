@@ -24,7 +24,9 @@ _PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
 
 
 def _load_prompt_pair(filename: str) -> tuple[str, str]:
-    """Split on \\n---\\n (the convention used in dialogue.py::_load_prompt)."""
+    """读取 \\n---\\n 分隔的双段 prompt，返回 (system, user)。
+    若文件不含 \\n---\\n 分隔符，则回落为 ("", 全文)——调用方需自行判断该回落
+    是否合适（例如 `l2_generate_patterns.txt` 用 [SYSTEM]/[USER] 标记，需要特殊处理）。"""
     text = (_PROMPTS / filename).read_text(encoding="utf-8")
     parts = text.split("\n---\n", 1)
     if len(parts) == 2:
@@ -56,8 +58,11 @@ def _expect_non_empty_string(raw: str) -> bool:
 
 
 def _expect_parseable_float(raw: str) -> bool:
-    float(raw.strip())
-    return True
+    try:
+        float(raw.strip())
+        return True
+    except ValueError:
+        return False
 
 
 def _smoke_detect_emotion():
@@ -88,6 +93,8 @@ def main() -> int:
     fail = 0
     for cs in CALL_SITES:
         name = cs["name"]
+        # expect() returning False → wrong shape (FAIL(schema), raw_head printed);
+        # raising → parse/network failure (FAIL(exception), traceback printed).
         try:
             raw = cs["invoke"]()
             ok = cs["expect"](raw)
