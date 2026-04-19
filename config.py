@@ -16,8 +16,8 @@ MINIMAX_BASE_URL = ""
 KIMI_MODEL = ""
 KIMI_BASE_URL = ""
 
-GLM_MODEL = ""
-GLM_BASE_URL = ""
+GLM_MODEL = "glm-5.1"
+GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
 
 # 简单任务模型（情绪检测、对话生成）
 CHAT_MODEL = "deepseek-chat"

@@ -74,33 +74,44 @@ _PROVIDER_ENV_KEYS = {
 }
 
 
-def _get_chat_client() -> tuple[OpenAI, str]:
-    """根据 LLM_PROVIDER 返回 (OpenAI client, model_name)。"""
+def _get_chat_client() -> tuple[OpenAI, str, dict]:
+    """根据 LLM_PROVIDER 返回 (OpenAI client, model_name, extra_body)。
+    extra_body 透传到 chat.completions.create；对推理模型用它关掉 thinking，
+    让生产调用点的 max_tokens 预算不被推理吃掉。"""
     provider = getattr(config, "LLM_PROVIDER", "deepseek")
 
     if provider == "deepseek":
         api_key = config.DEEPSEEK_API_KEY or os.environ.get("DEEPSEEK_API_KEY", "")
         if not api_key:
             raise RuntimeError("DEEPSEEK_API_KEY 未配置（config.py 或环境变量）")
-        return OpenAI(api_key=api_key, base_url=config.DEEPSEEK_BASE_URL), config.DEEPSEEK_MODEL
+        return OpenAI(api_key=api_key, base_url=config.DEEPSEEK_BASE_URL), config.DEEPSEEK_MODEL, {}
 
     if provider == "minimax":
         api_key = os.environ.get("MINIMAX_API_KEY", "")
         if not api_key:
             raise RuntimeError("MINIMAX_API_KEY 未配置（环境变量）")
-        return OpenAI(api_key=api_key, base_url=config.MINIMAX_BASE_URL), config.MINIMAX_MODEL
+        # TODO(minimax): 关推理的官方参数待确认。试过 enable_thinking / reasoning_effort /
+        # thinking.type=disabled / no_think / chat_template_kwargs.enable_thinking 等均无效，
+        # reasoning_tokens 仍 >0。暂为空，依赖 _sanitize 剥 <think> 并搭配生产侧 max_tokens。
+        return OpenAI(api_key=api_key, base_url=config.MINIMAX_BASE_URL), config.MINIMAX_MODEL, {}
 
     if provider == "kimi":
         api_key = os.environ.get("KIMI_API_KEY", "")
         if not api_key:
             raise RuntimeError("KIMI_API_KEY 未配置（环境变量）")
-        return OpenAI(api_key=api_key, base_url=config.KIMI_BASE_URL), config.KIMI_MODEL
+        return OpenAI(api_key=api_key, base_url=config.KIMI_BASE_URL), config.KIMI_MODEL, {}
 
     if provider == "glm":
         api_key = os.environ.get("GLM_API_KEY", "")
         if not api_key:
             raise RuntimeError("GLM_API_KEY 未配置（环境变量）")
-        return OpenAI(api_key=api_key, base_url=config.GLM_BASE_URL), config.GLM_MODEL
+        # glm-5.1 默认开 thinking，会把 reasoning_tokens 算进 max_tokens 预算；关掉让
+        # content 直接拿到答案。智谱 BigModel OpenAI 兼容口官方支持该字段。
+        return (
+            OpenAI(api_key=api_key, base_url=config.GLM_BASE_URL),
+            config.GLM_MODEL,
+            {"thinking": {"type": "disabled"}},
+        )
 
     raise RuntimeError(f"未知 LLM_PROVIDER: {provider!r}，可选: deepseek | minimax | kimi | glm")
 
@@ -131,12 +142,13 @@ def chat_completion(
     """根据 LLM_PROVIDER 路由调用 chat，返回回复文本。embedding 不受影响。"""
 
     def _call():
-        client, model = _get_chat_client()
+        client, model, extra_body = _get_chat_client()
         resp = client.chat.completions.create(
             model=model,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
+            extra_body=extra_body or None,
         )
         return resp.choices[0].message.content
 
