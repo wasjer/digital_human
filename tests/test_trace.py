@@ -29,7 +29,8 @@ def test_turn_activates_and_deactivates_trace():
     assert trace.current() is None
 
 
-def test_turn_allows_debug_flag():
+def test_turn_allows_debug_flag(tmp_path, monkeypatch):
+    monkeypatch.setattr(trace, "_SESSIONS_DIR", tmp_path)
     with trace.turn("agent_x", "hi", debug=True):
         t = trace.current()
         assert t.debug is True
@@ -178,7 +179,8 @@ def test_debug_mode_writes_markdown_file(tmp_path, monkeypatch):
     assert "hi" in content
 
 
-def test_debug_mode_console_shows_subitems(capsys):
+def test_debug_mode_console_shows_subitems(capsys, tmp_path, monkeypatch):
+    monkeypatch.setattr(trace, "_SESSIONS_DIR", tmp_path)
     with trace.turn("a", "m", debug=True) as t:
         trace.event("embedding", dim=1024, elapsed_ms=900)
         trace.event("vector_search", raw_hits=14, after_dedup=14, limit=20, elapsed_ms=230)
