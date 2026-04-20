@@ -72,7 +72,7 @@ def event(kind: str, **data) -> None:
     t = _current.get()
     if t is None:
         return
-    pass
+    t._pending_events.append({"kind": kind, **data})
 
 
 @contextmanager

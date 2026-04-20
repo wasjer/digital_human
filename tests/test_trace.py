@@ -61,3 +61,26 @@ def test_mark_without_summary_leaves_none():
     with trace.turn("a", "m") as t:
         trace.mark("记忆检索")
         assert t.steps[0].explicit_summary is None
+
+
+def test_events_between_marks_attach_to_next_step():
+    with trace.turn("a", "m") as t:
+        trace.event("llm_call", provider="minimax", total_tokens=47)
+        trace.mark("情绪检测")
+        # 第二批
+        trace.event("vector_search", raw_hits=14, after_dedup=14)
+        trace.event("graph_expand", neighbors_added=3)
+        trace.mark("记忆检索")
+
+    assert len(t.steps[0].events) == 1
+    assert t.steps[0].events[0]["kind"] == "llm_call"
+    assert t.steps[0].events[0]["total_tokens"] == 47
+    assert len(t.steps[1].events) == 2
+    assert {e["kind"] for e in t.steps[1].events} == {"vector_search", "graph_expand"}
+
+
+def test_event_before_any_mark_still_attaches_to_first_step():
+    with trace.turn("a", "m") as t:
+        trace.event("llm_call", provider="x")
+        trace.mark("step1")
+        assert len(t.steps[0].events) == 1
