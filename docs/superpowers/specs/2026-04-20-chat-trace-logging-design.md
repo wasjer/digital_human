@@ -62,6 +62,8 @@ scope: core/dialogue.py::chat() + 其直接依赖
 
 ### 3.1 新增模块 `core/trace.py`
 
+API 采用**扁平打点**设计，不用 `with` 包裹每个步骤——降低业务代码嵌套。
+
 ```python
 # 伪代码，非最终 API
 _current: ContextVar[Optional["Trace"]] = ContextVar("trace", default=None)
@@ -72,23 +74,32 @@ class Trace:
     turn_number: int
     debug: bool
     markdown_path: Path | None         # debug 模式才有
-    steps: list[Step]                  # 完成的步骤（带耗时、子事件）
-    _current_step: Step | None
-    _t_start: float
+    steps: list[Step]                  # 已完成步骤（带耗时、子事件）
+    _pending_events: list[Event]       # 上次 mark 至今累积的 events
+    _last_mark_ts: float               # 上次 mark 的 monotonic 时间
+    _t_start: float                    # turn 开始时间
 
-    def step(self, name: str, total: int = 4) -> ContextManager: ...
-    def event(self, kind: str, **data) -> None: ...   # 记入当前步骤
-    def end(self) -> None: ...   # 打印解说；debug 模式下追加写 md 文件
+# 模块级函数（未激活 trace 时自动 no-op，调用处不需要判空）
+def turn(agent_id, user_message, debug=False) -> ContextManager:
+    """唯一的 with 块：包一整轮。进入时 start_turn，退出时 end_turn（含异常）。"""
 
-def start_turn(agent_id, user_message, debug=False) -> Trace: ...
-def current() -> Trace | None: ...                    # 插桩点用
+def mark(name: str, summary: str | None = None, total: int = 4) -> None:
+    """结束当前步骤：elapsed = now - _last_mark_ts；累积的 events 归入该 step；
+    _last_mark_ts 更新为 now。summary=None 时由 trace 从 events 自动组装。"""
+
+def event(kind: str, **data) -> None:
+    """挂到当前累积区的一条事件（llm_call / embedding / vector_search / ...）。"""
+
+def current() -> Trace | None: ...   # 插桩点偶尔需要判 debug 时才用
 ```
 
+- **只有一处 `with`**：`main_chat.py` 外层包一次 `with trace.turn(...)`；`chat()` 内部
+  4 次 `trace.mark(...)` 扁平打点，没有嵌套缩进。
 - 用 `contextvars.ContextVar` 存当前 trace，`llm_client` 和 `retrieval` 从上下文取，
   **不需要改函数签名**。
-- 没激活 trace 时（tests 里、`seed_builder` 跑批时）所有 `current()` 返回 `None`，
-  `trace.event(...)` 前面先判空——对未改动的入口完全透明。这意味着 tests 里跑 `chat()`
-  不会出任何解说、不会落盘，只剩 §6 清理后的 WARN / ERROR / DEBUG（按 `LOG_LEVEL`）。
+- 未激活 trace 时（tests 里、`seed_builder` 跑批时）`mark` / `event` 都是 no-op，
+  调用处不写 `if current():` 判空。这意味着 tests 里跑 `chat()` 不会出任何解说、
+  不会落盘，只剩 §6 清理后的 WARN / ERROR / DEBUG（按 `LOG_LEVEL`）。
 - 线程边界：`end_session` 的后台线程不复用对话轮的 trace（Phase A 范围外），不需要
   `copy_context()`。
 
@@ -101,15 +112,36 @@ def current() -> Trace | None: ...                    # 插桩点用
 
 | 文件 | 改动 |
 |---|---|
-| `main_chat.py` | argparse 加 `--debug`；`chat()` 调用处外包一层 `with start_turn(...)` |
-| `core/dialogue.py::chat()` | 4 个 `# ── N. ──` 注释区段换成 `with trace.step(name, total=4)` |
-| `core/retrieval.py::retrieve()` | 每个阶段（embed / vector / graph / score / rerank）emit 一个 `event` |
-| `core/llm_client.py` | `chat_completion` / `get_embedding` 捕获 usage + 耗时 + messages + raw，emit `event("llm_call", ...)` / `event("embedding", ...)` |
+| `main_chat.py` | argparse 加 `--debug`；每轮 `chat()` 调用外包 `with trace.turn(agent_id, user_input, debug=args.debug)` |
+| `core/dialogue.py::chat()` | 4 个 `# ── N. ──` 区段末尾各加一行 `trace.mark(name, summary=...)` |
+| `core/retrieval.py::retrieve()` | 每个阶段（embed / vector / graph / score / rerank）一行 `trace.event(...)` |
+| `core/llm_client.py` | `chat_completion` / `get_embedding` 捕获 usage + 耗时 + messages + raw，一行 `trace.event("llm_call", ...)` / `trace.event("embedding", ...)` |
 
-### 4.1 chat() 的 4 个步骤
+### 4.1 chat() 的 4 个步骤（扁平打点示例）
 
-1. `[1/4] 情绪检测` — `_detect_emotion()` 这次 LLM 调用
-2. `[2/4] 记忆检索` — `retrieve()` 整个（内部子事件见下）
+```python
+def chat(agent_id, user_message, session_history, session_surfaced=None):
+    ...
+    emotion_intensity = _detect_emotion(user_message)
+    trace.mark("情绪检测", summary=f"{emotion_intensity:.2f}")
+
+    # L0 buffer 更新、情绪快照 —— 非 LLM/检索步骤，不单独 mark
+
+    retrieval_result = retrieve(agent_id, user_message, mode="dialogue", ...)
+    trace.mark("记忆检索")  # summary=None → trace 从 retrieve 的 events 自动组装
+
+    messages = _build_messages(...)
+    trace.mark("构造 prompt",
+               summary=f"system {len(system_prompt)} 字 / 历史 {min(6,len(session_history))} 轮 / 记忆 {len(memories)} 条")
+
+    reply = chat_completion(messages, max_tokens=512, temperature=0.7)
+    trace.mark("对话生成")  # summary=None → trace 从 llm_call event 自动组装
+
+    return {...}
+```
+
+1. `[1/4] 情绪检测` — `_detect_emotion()` 这次 LLM 调用（event 来自 llm_client）
+2. `[2/4] 记忆检索` — `retrieve()` 整个（内部 events 见 §4.2）
 3. `[3/4] 构造 prompt` — 拼接 system_prompt、注入 session_history、记忆块、L2 块
 4. `[4/4] 对话生成` — 主 `chat_completion()` 调用
 
@@ -129,7 +161,13 @@ def current() -> Trace | None: ...                    # 插桩点用
 
 - 步骤行：`[N/total] {步骤名:<10} → {summary}    ({耗时} | {tokens_or_embeds})`
 - 对齐：步骤名固定宽度 10，箭头后自由写
-- 摘要：步骤自定义，由该步骤收尾时从 events 聚合（例：`vector 14 / 去重 14 / 图扩展 +3 / 重排 top 8`）
+- **summary 来源**：
+  - 调用方在 `mark(name, summary=...)` 显式传入时使用调用方的
+  - `mark(name, summary=None)` 时，trace 根据本步骤累积的 events 自动组装：
+    - `llm_call` event 聚合 → `reply {n} 字`
+    - `embedding` + `vector_search` + `graph_expand` + `score_rerank` 聚合 →
+      `向量 {vector_hits} / 去重 {after_dedup} / 图扩展 +{n} / 重排 top {k}`
+  - 自动组装模板在 `core/trace.py` 里集中维护，业务代码不关心
 
 ### 5.2 Debug 模式 markdown 模板
 
@@ -248,21 +286,21 @@ weights={relevance:0.35, importance:0.20, recency:0.25, mood_fit:0.20}
 
 ## 7. Token 捕获
 
-`chat_completion()` 不改返回签名，在内部拿到 `resp.usage` 后 emit 给当前 trace：
+`chat_completion()` 不改返回签名，在内部拿到 `resp.usage` 后调用模块级 `trace.event`
+（未激活时自动 no-op，**无需 `if` 判空**）：
 
 ```python
 usage = getattr(resp, "usage", None)
-if trace := trace_mod.current():
-    trace.event(
-        "llm_call",
-        provider=provider, model=model,
-        messages=messages, raw=raw, sanitized=result,
-        prompt_tokens=getattr(usage, "prompt_tokens", None),
-        completion_tokens=getattr(usage, "completion_tokens", None),
-        total_tokens=getattr(usage, "total_tokens", None),
-        effective_max_tokens=effective_max,
-        elapsed_ms=..., attempt=...,
-    )
+trace.event(
+    "llm_call",
+    provider=provider, model=model,
+    messages=messages, raw=raw, sanitized=result,
+    prompt_tokens=getattr(usage, "prompt_tokens", None),
+    completion_tokens=getattr(usage, "completion_tokens", None),
+    total_tokens=getattr(usage, "total_tokens", None),
+    effective_max_tokens=effective_max,
+    elapsed_ms=..., attempt=...,
+)
 ```
 
 - 所有字段用 `getattr(..., None)`；某些 provider 不返回 usage 时汇总显示 `tokens=?`
