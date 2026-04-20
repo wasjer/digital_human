@@ -31,8 +31,12 @@ def _backup_agent(agent_id: str) -> Path:
     target = _AGENTS_DIR / agent_id
     if not target.exists():
         raise FileNotFoundError(f"agent dir not found: {target}")
-    with tarfile.open(tar_path, "w:gz") as tar:
-        tar.add(target, arcname=agent_id)
+    try:
+        with tarfile.open(tar_path, "w:gz") as tar:
+            tar.add(target, arcname=agent_id)
+    except Exception:
+        tar_path.unlink(missing_ok=True)
+        raise
     return tar_path
 
 
@@ -55,6 +59,7 @@ def run_benchmark(agent_id: str, dialogues_path: Path, run_label: str = "baselin
     session_history: list = []
     session_surfaced: set = set()
     t_start = time.time()
+    started_at = datetime.now().isoformat()
 
     try:
         for i, q in enumerate(dialogues):
@@ -90,13 +95,19 @@ def run_benchmark(agent_id: str, dialogues_path: Path, run_label: str = "baselin
         except Exception as e:
             logger.warning(f"benchmark end_session error (non-fatal): {e}")
     finally:
-        _restore_agent(agent_id, backup)
-        logger.info(f"benchmark restored from: {backup}")
+        try:
+            _restore_agent(agent_id, backup)
+            logger.info(f"benchmark restored from: {backup}")
+        except Exception as restore_exc:
+            logger.critical(
+                f"RESTORE FAILED — agent '{agent_id}' may be in inconsistent state. "
+                f"Manual restore from {backup}. Error: {restore_exc}"
+            )
 
     report = {
         "agent_id":       agent_id,
         "run_label":      run_label,
-        "started_at":     datetime.now().isoformat(),
+        "started_at":     started_at,
         "total_elapsed_s": round(time.time() - t_start, 2),
         "backup_tar":     str(backup),
         "question_count": len(dialogues),

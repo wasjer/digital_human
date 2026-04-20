@@ -42,3 +42,26 @@ def test_benchmark_backup_restore_roundtrip(tmp_path, monkeypatch):
     with tarfile.open(report["backup_tar"]) as tar:
         names = tar.getnames()
         assert any("soul.json" in n for n in names)
+
+
+def test_benchmark_restores_on_chat_exception(tmp_path, monkeypatch):
+    """即使 chat() 抛异常，agent 目录也必须被恢复，错误被记录到 results 而不是吞掉。"""
+    monkeypatch.setattr(br, "_AGENTS_DIR", tmp_path / "agents")
+    monkeypatch.setattr(br, "_BENCHMARK_DIR", tmp_path / "bench")
+    agent_dir = br._AGENTS_DIR / "test_agent"
+    agent_dir.mkdir(parents=True)
+    (agent_dir / "soul.json").write_text('{"agent_id": "test_agent"}', encoding="utf-8")
+
+    dialogues = tmp_path / "d.json"
+    dialogues.write_text(json.dumps([{"text": "你好", "category": "寒暄"}]), encoding="utf-8")
+
+    with patch.object(br, "chat", side_effect=RuntimeError("boom")), \
+         patch.object(br, "end_session", side_effect=_fake_end_session):
+        report = br.run_benchmark("test_agent", dialogues, run_label="err")
+
+    # 1) agent 目录被恢复（soul.json 原样存在）
+    assert (agent_dir / "soul.json").read_text(encoding="utf-8") == '{"agent_id": "test_agent"}'
+    # 2) 错误被记录而非吞掉
+    assert report["ok_count"] == 0
+    assert report["results"][0]["error"] == "boom"
+    assert report["results"][0]["reply"] is None
