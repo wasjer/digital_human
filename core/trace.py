@@ -20,6 +20,16 @@ _current: ContextVar[Optional[Trace]] = ContextVar("trace", default=None)
 
 
 @dataclass
+class Step:
+    name: str
+    index: int
+    total: int
+    elapsed_ms: int
+    explicit_summary: str | None
+    events: list[dict] = field(default_factory=list)
+
+
+@dataclass
 class Trace:
     """单轮对话的 trace 容器。字段在后续 task 逐步补齐。"""
     agent_id: str
@@ -28,6 +38,9 @@ class Trace:
     debug: bool
     turn_number: int = 1
     t_start: float = field(default_factory=time.monotonic)
+    steps: list[Step] = field(default_factory=list)
+    _pending_events: list[dict] = field(default_factory=list)
+    _last_mark_ts: float = field(default_factory=time.monotonic)
 
 
 def current() -> Optional[Trace]:
@@ -39,8 +52,19 @@ def mark(name: str, summary: str | None = None, total: int = 4) -> None:
     t = _current.get()
     if t is None:
         return
-    # 占位：后续 task 实现
-    pass
+    now = time.monotonic()
+    elapsed_ms = int((now - t._last_mark_ts) * 1000)
+    step = Step(
+        name=name,
+        index=len(t.steps) + 1,
+        total=total,
+        elapsed_ms=elapsed_ms,
+        explicit_summary=summary,
+        events=t._pending_events,
+    )
+    t.steps.append(step)
+    t._pending_events = []
+    t._last_mark_ts = now
 
 
 def event(kind: str, **data) -> None:

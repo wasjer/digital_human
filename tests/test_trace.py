@@ -42,3 +42,22 @@ def test_nested_turns_restore_previous(tmp_path, monkeypatch):
         with trace.turn("b", "m2"):
             assert trace.current() is not outer
         assert trace.current() is outer
+
+
+def test_mark_accumulates_steps():
+    with trace.turn("a", "m") as t:
+        trace.mark("情绪检测", summary="0.15")
+        trace.mark("记忆检索", summary="向量 14 / top 8")
+        assert len(t.steps) == 2
+        assert t.steps[0].name == "情绪检测"
+        assert t.steps[0].index == 1
+        assert t.steps[0].total == 4
+        assert t.steps[0].explicit_summary == "0.15"
+        assert t.steps[0].elapsed_ms >= 0
+        assert t.steps[1].index == 2
+
+
+def test_mark_without_summary_leaves_none():
+    with trace.turn("a", "m") as t:
+        trace.mark("记忆检索")
+        assert t.steps[0].explicit_summary is None
