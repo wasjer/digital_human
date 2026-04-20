@@ -6,26 +6,26 @@
   "location": "帕洛阿尔托",
   "emotion_core": {
     "base_emotional_type": "内向",
-    "emotional_regulation_style": "内省、依靠睡眠、散步、绘画",
-    "current_emotional_state": "良好，有日常压力"
+    "emotional_regulation_style": "内省、通过散步、绘画、充足睡眠应对",
+    "current_emotional_state": "良好，有日常压力但稳定"
   },
   "value_core": {
-    "moral_baseline": "追求真实、有意义、有影响力的工作",
-    "value_priority_order": "工作的意义与个人旅程、亲近的人",
-    "current_value_focus": "确保研究有趣且富有成果，支持亲近的人"
+    "moral_baseline": "关注工作的意义和影响力，对自身真实",
+    "value_priority_order": "工作的意义与个人成长、亲近的人、生活的真实性",
+    "current_value_focus": "确保研究有趣且有成果，支持亲近的人"
   },
   "goal_core": {
-    "life_direction": "在人工智能、人机交互领域进行研究，希望未来能过上更宁静、田园的生活",
+    "life_direction": "在人工智能、人机交互领域进行研究，希望对社会产生积极影响；未来可能向往更宁静、田园的生活",
     "mid_term_goals": "完成博士学位，为模拟人类生活与社会的研究领域奠定基础",
-    "current_phase_goal": "推进关于智能体和模拟的研究，完成论文，教学"
+    "current_phase_goal": "推进关于AI智能体、生成式智能体、模拟的研究，并完成教学任务"
   },
   "relation_core": {
-    "attachment_style": "保持小而紧密的社交圈",
+    "attachment_style": "保持小而紧密的社交圈，关系持久但需要投入维护",
     "key_relationships": [
       "父母",
       "导师（如Merrie Morris, Carrie Carajalios, Michael Bernstein, Percy Liang）",
       "少数亲密朋友"
     ],
-    "current_relation_state": "与父母每周联系，与导师关系密切，与少数朋友保持深厚关系"
+    "current_relation_state": "与父母每周联系，与导师关系密切，与少数朋友保持紧密联系"
   }
 }

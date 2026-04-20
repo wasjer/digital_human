@@ -1,7 +1,7 @@
 """
 nuwa_seed_builder.py
 
-从 nuwa-skill 产出的 examples/{person_slug}-perspective/ 目录一次性创建
+从 nuwa-skill 产出的 nuwa_source/{person_slug}-perspective/ 目录一次性创建
 完整的 digital_human agent（seed + soul + L1 记忆）。
 
 与 seed_memory_loader.py 并行存在，两者互不干扰。
@@ -44,7 +44,7 @@ from core.memory_l2 import check_and_generate_patterns, contribute_to_soul
 logger = logging.getLogger("nuwa_seed_builder")
 
 _PROJECT_ROOT = Path(__file__).parent.parent
-_EXAMPLES_DIR = _PROJECT_ROOT / "examples"
+_NUWA_SOURCE_DIR = _PROJECT_ROOT / "nuwa_source"
 _AGENTS_DIR   = _PROJECT_ROOT / "data" / "agents"
 _SEEDS_DIR    = _PROJECT_ROOT / "data" / "seeds"
 _PROMPTS_DIR  = _PROJECT_ROOT / "prompts"
@@ -67,8 +67,8 @@ def _load_prompt(filename: str) -> str:
 
 
 def _read_source(person_slug: str) -> dict:
-    """读取 examples/{slug}-perspective/ 下全部可用文件，返回 dict。"""
-    src_dir = _EXAMPLES_DIR / f"{person_slug}-perspective"
+    """读取 nuwa_source/{slug}-perspective/ 下全部可用文件，返回 dict。"""
+    src_dir = _NUWA_SOURCE_DIR / f"{person_slug}-perspective"
     if not src_dir.exists():
         raise FileNotFoundError(f"nuwa 源目录不存在：{src_dir}")
 
@@ -119,19 +119,53 @@ def _extract_timeline_table(skill_md: str) -> str:
     return m.group(0) if m else ""
 
 
-def _extract_l1_events(agent_name: str, src: dict) -> list[dict]:
-    template = _load_prompt("nuwa_research_to_l1.txt")
-    timeline_table = _extract_timeline_table(src["skill_md"])
+_L1_EVENT_KINDS = ("biography", "decision", "writing", "conversation")
 
-    user = template.format(
-        agent_name=agent_name,
-        current_year=_CURRENT_YEAR,
-        timeline_table=timeline_table or "（无）",
-        decisions_md=src["decisions_md"]           or "（无）",
-        writings_md=src["writings_md"]             or "（无）",
-        conversations_md=src["conversations_md"]   or "（无）",
-        timeline_md=src["timeline_md"]             or "（无）",
+
+def _extract_events_of_kind(
+    kind: str, agent_name: str, src: dict, timeline_table: str
+) -> list[dict]:
+    """按 event_kind 分批：只填该批关联的源文件，其余置为占位符。源为空则跳过。"""
+    _SKIP = "（无，跳过）"
+    fmt_args = {
+        "agent_name":        agent_name,
+        "current_year":      _CURRENT_YEAR,
+        "timeline_table":    _SKIP,
+        "decisions_md":      _SKIP,
+        "writings_md":       _SKIP,
+        "conversations_md":  _SKIP,
+        "timeline_md":       _SKIP,
+    }
+
+    if kind == "biography":
+        if not (timeline_table or src["timeline_md"]):
+            logger.info(f"_extract_events_of_kind skip kind={kind} (empty source)")
+            return []
+        fmt_args["timeline_table"] = timeline_table or "（无）"
+        fmt_args["timeline_md"]    = src["timeline_md"] or "（无）"
+    elif kind == "decision":
+        if not src["decisions_md"]:
+            logger.info(f"_extract_events_of_kind skip kind={kind} (empty source)")
+            return []
+        fmt_args["decisions_md"] = src["decisions_md"]
+    elif kind == "writing":
+        if not src["writings_md"]:
+            logger.info(f"_extract_events_of_kind skip kind={kind} (empty source)")
+            return []
+        fmt_args["writings_md"] = src["writings_md"]
+    elif kind == "conversation":
+        if not src["conversations_md"]:
+            logger.info(f"_extract_events_of_kind skip kind={kind} (empty source)")
+            return []
+        fmt_args["conversations_md"] = src["conversations_md"]
+    else:
+        raise ValueError(f"unknown kind={kind}")
+
+    template = _load_prompt("nuwa_research_to_l1.txt")
+    user = template.format(**fmt_args) + (
+        f'\n\n本批次只生成 event_kind="{kind}" 的事件，不要生成其他类型。'
     )
+
     raw = chat_completion(
         [{"role": "user", "content": user}],
         max_tokens=_BATCH_MAX_TOKENS, temperature=0.2,
@@ -139,12 +173,29 @@ def _extract_l1_events(agent_name: str, src: dict) -> list[dict]:
     try:
         events = json.loads(_strip_json(raw))
     except json.JSONDecodeError as e:
-        logger.error(f"_extract_l1_events json parse error e={e} raw={raw[:400]}")
-        raise
+        logger.error(
+            f"_extract_events_of_kind json parse error kind={kind} e={e} "
+            f"raw_len={len(raw)} raw_tail={raw[-400:]}"
+        )
+        raise RuntimeError(
+            f"L1 events 批次失败（可能仍被截断，考虑再细分）：kind={kind}"
+        ) from e
     if not isinstance(events, list):
-        raise ValueError(f"_extract_l1_events expected list, got {type(events)}")
-    logger.info(f"_extract_l1_events extracted={len(events)} events")
+        raise ValueError(
+            f"_extract_events_of_kind expected list for kind={kind}, got {type(events)}"
+        )
+    logger.info(f"_extract_events_of_kind kind={kind} extracted={len(events)}")
     return events
+
+
+def _extract_l1_events(agent_name: str, src: dict) -> list[dict]:
+    """按 4 个 event_kind 分批调用 LLM，拼成完整 L1 事件列表。"""
+    timeline_table = _extract_timeline_table(src["skill_md"])
+    all_events: list[dict] = []
+    for kind in _L1_EVENT_KINDS:
+        all_events.extend(_extract_events_of_kind(kind, agent_name, src, timeline_table))
+    logger.info(f"_extract_l1_events total={len(all_events)} (batched by event_kind)")
+    return all_events
 
 
 def _build_soul_direct(agent_id: str, seed: dict) -> dict:
@@ -189,7 +240,7 @@ def _build_soul_direct(agent_id: str, seed: dict) -> dict:
 def build_from_nuwa(person_slug: str, agent_id: str, force: bool = False) -> dict:
     """
     输入：
-      person_slug: examples/{slug}-perspective/ 目录前缀（如 "steve-jobs"）
+      person_slug: nuwa_source/{slug}-perspective/ 目录前缀（如 "steve-jobs"）
       agent_id:    新 agent 的 ID
       force:       已存在时删除重建
     """
@@ -288,12 +339,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="从 nuwa-skill 产出一键构建 digital_human agent",
     )
-    parser.add_argument("person_slug", help="examples/{slug}-perspective/ 的 slug")
+    parser.add_argument("person_slug", help="nuwa_source/{slug}-perspective/ 的 slug")
     parser.add_argument("agent_id",    help="新 agent 的 ID")
     parser.add_argument("--force", "-f", action="store_true", help="覆盖重建")
     args = parser.parse_args()
 
-    src_dir = _EXAMPLES_DIR / f"{args.person_slug}-perspective"
+    src_dir = _NUWA_SOURCE_DIR / f"{args.person_slug}-perspective"
     if not src_dir.exists():
         print(f"错误：找不到源目录 {src_dir}", file=sys.stderr)
         sys.exit(1)

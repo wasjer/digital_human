@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # LLM 路由配置
-LLM_PROVIDER = "deepseek"  # 可选: "deepseek" | "minimax" | "kimi" | "glm"
+LLM_PROVIDER = "minimax"  # 可选: "deepseek" | "minimax" | "kimi" | "glm"
 
 # 复杂任务模型（重要度提取、L2 规律、重排序、soul 证据检查）
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
