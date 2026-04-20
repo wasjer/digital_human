@@ -84,3 +84,69 @@ def test_event_before_any_mark_still_attaches_to_first_step():
         trace.event("llm_call", provider="x")
         trace.mark("step1")
         assert len(t.steps[0].events) == 1
+
+
+import io
+import contextlib
+
+
+def _render_to_string(t) -> str:
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        trace._render_default(t)
+    return buf.getvalue()
+
+
+def test_render_default_header_and_footer():
+    with trace.turn("agent_x", "你好") as t:
+        trace.event("llm_call", total_tokens=47, prompt_tokens=45, completion_tokens=2)
+        trace.mark("情绪检测", summary="0.15")
+    out = _render_to_string(t)
+    # 头部：═══ 轮 1 | agent=agent_x | session=... | HH:MM:SS ═══
+    assert out.splitlines()[0].startswith("═══ 轮 1 | agent=agent_x")
+    # 脚部
+    assert "轮 1 完成" in out
+    assert "总 token 47" in out
+
+
+def test_render_default_step_line_shape():
+    with trace.turn("a", "m") as t:
+        trace.event("llm_call", total_tokens=47, prompt_tokens=45, completion_tokens=2)
+        trace.mark("情绪检测", summary="0.15")
+    out = _render_to_string(t)
+    # 形如：[1/4] 情绪检测      → 0.15      (0.0s | tokens 45+2→47)
+    step_line = [l for l in out.splitlines() if l.startswith("[1/4]")][0]
+    assert "→ 0.15" in step_line
+    assert "tokens 45+2→47" in step_line
+
+
+def test_render_auto_summary_for_retrieval_step():
+    with trace.turn("a", "m") as t:
+        trace.event("embedding", dim=1024)
+        trace.event("vector_search", raw_hits=14, after_dedup=14)
+        trace.event("graph_expand", neighbors_added=3)
+        trace.event("score_rerank", top_k_returned=8)
+        trace.mark("记忆检索")  # summary=None → 自动组装
+    out = _render_to_string(t)
+    step_line = [l for l in out.splitlines() if l.startswith("[1/4]")][0]
+    assert "向量 14" in step_line and "去重 14" in step_line
+    assert "图扩展 +3" in step_line and "top 8" in step_line
+
+
+def test_render_auto_summary_for_llm_step():
+    with trace.turn("a", "m") as t:
+        trace.event("llm_call", sanitized="回复内容", total_tokens=100, prompt_tokens=80, completion_tokens=20)
+        trace.mark("对话生成")
+    out = _render_to_string(t)
+    step_line = [l for l in out.splitlines() if l.startswith("[1/4]")][0]
+    assert "reply 4 字" in step_line  # "回复内容" 是 4 字
+
+
+def test_turn_exit_prints_to_stdout():
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        with trace.turn("a", "m"):
+            trace.event("llm_call", total_tokens=10, prompt_tokens=8, completion_tokens=2)
+            trace.mark("step1", summary="ok")
+    out = buf.getvalue()
+    assert "轮 1 完成" in out
