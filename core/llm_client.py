@@ -10,6 +10,7 @@ from typing import Optional
 from openai import OpenAI
 
 import config
+from core import trace
 
 # ── 日志配置 ────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -157,6 +158,8 @@ def chat_completion(
     temperature: float = 0.7,
 ) -> str:
     """根据 LLM_PROVIDER 路由调用 chat，返回回复文本。embedding 不受影响。"""
+    provider = getattr(config, "LLM_PROVIDER", "deepseek")
+    captured: dict = {}
 
     def _call():
         client, model, extra_body, token_mul = _get_chat_client()
@@ -166,6 +169,7 @@ def chat_completion(
                 f"chat_completion max_tokens={max_tokens}x{token_mul}->{effective_max} "
                 f"(provider reasoning budget)"
             )
+        t0 = time.monotonic()
         resp = client.chat.completions.create(
             model=model,
             messages=messages,
@@ -173,12 +177,32 @@ def chat_completion(
             temperature=temperature,
             extra_body=extra_body or None,
         )
+        captured["elapsed_ms"] = int((time.monotonic() - t0) * 1000)
+        captured["model"] = model
+        captured["effective_max_tokens"] = effective_max
+        captured["usage"] = getattr(resp, "usage", None)
         return resp.choices[0].message.content
 
     result_raw = _retry(_call, operation="chat_completion")
     result = _sanitize(result_raw)
     trimmed = (len(result_raw) if result_raw else 0) - len(result)
     logger.debug(f"chat_completion result_len={len(result)} sanitize_trimmed={trimmed}")
+
+    usage = captured.get("usage")
+    trace.event(
+        "llm_call",
+        provider=provider,
+        model=captured.get("model"),
+        messages=messages,
+        raw=result_raw,
+        sanitized=result,
+        prompt_tokens=getattr(usage, "prompt_tokens", None),
+        completion_tokens=getattr(usage, "completion_tokens", None),
+        total_tokens=getattr(usage, "total_tokens", None),
+        effective_max_tokens=captured.get("effective_max_tokens"),
+        elapsed_ms=captured.get("elapsed_ms", 0),
+        attempt=1,
+    )
     return result
 
 
