@@ -15,6 +15,7 @@ from core.soul import (
 from core.global_state import read_global_state
 from core.memory_l1 import write_event
 from core.retrieval import retrieve
+from core import trace
 
 logger = logging.getLogger("dialogue")
 
@@ -147,7 +148,7 @@ def chat(agent_id: str, user_message: str,
 
     # ── 1. 情绪检测 ───────────────────────────────────────────────────────────
     emotion_intensity = _detect_emotion(user_message)
-    logger.info(f"chat agent_id={agent_id} emotion_intensity={emotion_intensity:.3f}")
+    trace.mark("情绪检测", summary=f"{emotion_intensity:.2f}")
 
     # ── 2. 情绪峰值快照 ────────────────────────────────────────────────────────
     buf = _load_l0(agent_id)
@@ -174,6 +175,7 @@ def chat(agent_id: str, user_message: str,
 
     # ── 4. 更新 session_surfaced ───────────────────────────────────────────────
     session_surfaced = session_surfaced | set(retrieval_result["surfaced_ids"])
+    trace.mark("记忆检索")
 
     # ── 5. 追加 user 消息到 l0_buffer ─────────────────────────────────────────
     buf["raw_dialogue"].append({"role": "user", "content": user_message})
@@ -199,6 +201,13 @@ def chat(agent_id: str, user_message: str,
         memories_block=memories_block,
         user_message=user_message,
     )
+    trace.mark(
+        "构造 prompt",
+        summary=(
+            f"system {len(system_prompt)} 字 / 历史 {min(6, len(session_history))} 轮 / "
+            f"记忆 {len(retrieval_result['relevant_memories'])} 条"
+        ),
+    )
 
     # ── 7. LLM 生成回答 ────────────────────────────────────────────────────────
     messages = [{"role": "system", "content": system_prompt}]
@@ -211,13 +220,13 @@ def chat(agent_id: str, user_message: str,
     except Exception as e:
         logger.error(f"chat LLM generation failed: {e}")
         reply = "（系统错误，无法生成回复）"
+    trace.mark("对话生成")
 
     # ── 8. 追加 assistant 消息到 l0_buffer ────────────────────────────────────
     buf = _load_l0(agent_id)
     buf["raw_dialogue"].append({"role": "assistant", "content": reply})
     _save_l0(agent_id, buf)
 
-    logger.info(f"chat done agent_id={agent_id} reply_len={len(reply)}")
     return {
         "reply":             reply,
         "session_surfaced":  session_surfaced,
