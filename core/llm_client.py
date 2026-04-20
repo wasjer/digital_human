@@ -14,9 +14,12 @@ import config
 # ── 日志配置 ────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL, logging.INFO),
-    format="%(asctime)s llm_client %(message)s",
+    format="%(asctime)s %(name)s %(message)s",
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
 logger = logging.getLogger("llm_client")
 
 
@@ -135,7 +138,7 @@ def _retry(fn, operation: str, max_retries: int = 3, base_delay: float = 2.0):
     for attempt in range(1, max_retries + 1):
         try:
             result = fn()
-            logger.info(f"{operation} success attempt={attempt}")
+            logger.debug(f"{operation} success attempt={attempt}")
             return result
         except Exception as e:
             if attempt == max_retries:
@@ -159,7 +162,7 @@ def chat_completion(
         client, model, extra_body, token_mul = _get_chat_client()
         effective_max = min(max_tokens * token_mul, config.LLM_MAX_OUTPUT_TOKENS)
         if effective_max != max_tokens:
-            logger.info(
+            logger.debug(
                 f"chat_completion max_tokens={max_tokens}x{token_mul}->{effective_max} "
                 f"(provider reasoning budget)"
             )
@@ -175,7 +178,7 @@ def chat_completion(
     result_raw = _retry(_call, operation="chat_completion")
     result = _sanitize(result_raw)
     trimmed = (len(result_raw) if result_raw else 0) - len(result)
-    logger.info(f"chat_completion result_len={len(result)} sanitize_trimmed={trimmed}")
+    logger.debug(f"chat_completion result_len={len(result)} sanitize_trimmed={trimmed}")
     return result
 
 
@@ -199,5 +202,5 @@ def get_embedding(text: str) -> list[float]:
             return json.loads(resp.read())["data"][0]["embedding"]
 
     result = _retry(_call, operation="get_embedding", max_retries=5)
-    logger.info(f"get_embedding dim={len(result)}")
+    logger.debug(f"get_embedding dim={len(result)}")
     return result
