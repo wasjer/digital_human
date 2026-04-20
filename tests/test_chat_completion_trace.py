@@ -71,3 +71,25 @@ def test_chat_completion_handles_missing_usage(mock_get_client):
     llm = t.steps[0].events[0]
     assert llm["prompt_tokens"] is None
     assert llm["total_tokens"] is None
+
+
+@patch("core.llm_client.urllib.request.urlopen")
+def test_get_embedding_emits_embedding_event(mock_urlopen):
+    import json as _json
+    ctx = MagicMock()
+    ctx.__enter__.return_value.read.return_value = _json.dumps(
+        {"data": [{"embedding": [0.1] * 1024}]}
+    ).encode()
+    mock_urlopen.return_value = ctx
+
+    from core.llm_client import get_embedding
+
+    with trace.turn("a", "m") as t:
+        get_embedding("你好世界")
+        trace.mark("retrieve")
+
+    emb_events = [e for e in t.steps[0].events if e["kind"] == "embedding"]
+    assert len(emb_events) == 1
+    assert emb_events[0]["dim"] == 1024
+    assert emb_events[0]["text_len"] == 4  # "你好世界"
+    assert emb_events[0]["elapsed_ms"] >= 0

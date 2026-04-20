@@ -208,6 +208,7 @@ def chat_completion(
 
 def get_embedding(text: str) -> list[float]:
     """调用 SiliconFlow bge-m3 生成 embedding，返回 float 列表。不随 LLM_PROVIDER 切换。"""
+    t0 = time.monotonic()
 
     def _call():
         api_key = config.SILICONFLOW_API_KEY or os.environ.get("SILICONFLOW_API_KEY", "")
@@ -227,4 +228,10 @@ def get_embedding(text: str) -> list[float]:
 
     result = _retry(_call, operation="get_embedding", max_retries=5)
     logger.debug(f"get_embedding dim={len(result)}")
+    trace.event(
+        "embedding",
+        dim=len(result),
+        text_len=len(text),
+        elapsed_ms=int((time.monotonic() - t0) * 1000),
+    )
     return result
