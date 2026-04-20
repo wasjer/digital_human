@@ -41,3 +41,14 @@ def test_chat_produces_four_steps(
     assert step_names == ["情绪检测", "记忆检索", "构造 prompt", "对话生成"]
     assert all(s.total == 4 for s in t.steps)
     assert result["reply"] == "好的"
+
+
+def test_main_chat_accepts_debug_flag():
+    # 只是 smoke 验证 argparse 不报错；不真的进入 REPL
+    import subprocess, sys
+    result = subprocess.run(
+        [sys.executable, "main_chat.py", "--help"],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0
+    assert "--debug" in result.stdout
