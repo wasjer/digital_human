@@ -150,3 +150,55 @@ def test_turn_exit_prints_to_stdout():
             trace.mark("step1", summary="ok")
     out = buf.getvalue()
     assert "轮 1 完成" in out
+
+
+from pathlib import Path
+
+
+def test_debug_mode_writes_markdown_file(tmp_path, monkeypatch):
+    # 指向 tmp 目录
+    monkeypatch.setattr(trace, "_SESSIONS_DIR", tmp_path)
+
+    with trace.turn("agent_x", "你好", debug=True) as t:
+        trace.event("llm_call",
+                    provider="minimax", model="minimax-m2.7-highspeed",
+                    messages=[{"role": "user", "content": "你好"}],
+                    raw="hi", sanitized="hi",
+                    prompt_tokens=5, completion_tokens=2, total_tokens=7,
+                    effective_max_tokens=8192, elapsed_ms=1200, attempt=1)
+        trace.mark("情绪检测", summary="0.1")
+
+    md_path = tmp_path / f"{t.session_id}.md"
+    assert md_path.exists()
+    content = md_path.read_text(encoding="utf-8")
+    assert "## 轮 1" in content
+    assert "### [1/4] 情绪检测" in content
+    assert "provider" in content and "minimax" in content
+    # raw / sanitized 都应出现
+    assert "hi" in content
+
+
+def test_debug_mode_console_shows_subitems(capsys):
+    with trace.turn("a", "m", debug=True) as t:
+        trace.event("embedding", dim=1024, elapsed_ms=900)
+        trace.event("vector_search", raw_hits=14, after_dedup=14, limit=20, elapsed_ms=230)
+        trace.event("graph_expand", neighbors_added=3, top5_ids=["a", "b"])
+        trace.event("score_rerank", top_k_returned=8,
+                    weights={"relevance": 0.35, "importance": 0.20})
+        trace.mark("记忆检索")
+    out = capsys.readouterr().out
+    # 主行仍在
+    assert "[1/4] 记忆检索" in out
+    # debug 子项用 ├ / └ 前缀
+    assert "├" in out or "└" in out
+    assert "dim=1024" in out
+    assert "raw_hits=14" in out
+
+
+def test_non_debug_mode_does_not_write_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(trace, "_SESSIONS_DIR", tmp_path)
+    with trace.turn("a", "m", debug=False):
+        trace.event("llm_call", total_tokens=10)
+        trace.mark("s1", summary="x")
+    # tmp_path 不应有任何文件
+    assert list(tmp_path.iterdir()) == []

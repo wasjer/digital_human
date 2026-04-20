@@ -14,7 +14,10 @@ import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Iterator, Optional
+
+_SESSIONS_DIR = Path(__file__).parent.parent / "logs" / "sessions"
 
 _current: ContextVar[Optional[Trace]] = ContextVar("trace", default=None)
 
@@ -151,6 +154,99 @@ def _render_default(t: Trace) -> None:
     print(_render_footer(t))
 
 
+def _render_event_subline(e: dict) -> str:
+    """debug 模式下一条 event 的缩进子行。"""
+    kind = e["kind"]
+    # 取前几个主要字段，尾端 truncate 到可读
+    data = {k: v for k, v in e.items() if k != "kind"}
+    # messages / raw / sanitized 太长，在控制台折叠成长度标记
+    compact = {}
+    for k, v in data.items():
+        if k in ("messages", "raw", "sanitized"):
+            if isinstance(v, str):
+                compact[k] = f"<{len(v)} 字>"
+            elif isinstance(v, list):
+                compact[k] = f"<{len(v)} 条消息>"
+        else:
+            compact[k] = v
+    body = " ".join(f"{k}={v}" for k, v in compact.items())
+    return f"  ├ {kind:<14} {body}"
+
+
+def _render_debug_console(t: Trace) -> None:
+    print(_render_header(t))
+    for s in t.steps:
+        print(_render_step_line(s))
+        for e in s.events:
+            print(_render_event_subline(e))
+    print(_render_footer(t))
+
+
+def _fence(lang: str, body: str) -> str:
+    return f"```{lang}\n{body}\n```"
+
+
+def _render_markdown_turn(t: Trace) -> str:
+    """一轮对话的 markdown 片段，追加写入 session 文件。"""
+    lines: list[str] = []
+    ts = datetime.now().strftime("%H:%M:%S")
+    total_elapsed_s = time.monotonic() - t.t_start
+    lines.append(f"## 轮 {t.turn_number} ({ts}, 耗时 {total_elapsed_s:.1f}s)\n")
+    lines.append(f"**用户输入**：{t.user_message}\n")
+
+    for s in t.steps:
+        summary = _auto_summary(s)
+        extras = _step_extras(s)
+        lines.append(f"### [{s.index}/{s.total}] {s.name} → {summary} ({extras})\n")
+        for e in s.events:
+            if e["kind"] == "llm_call":
+                lines.append(
+                    f"**provider**: {e.get('provider')} | **model**: {e.get('model')} | "
+                    f"**usage**: prompt={e.get('prompt_tokens')} "
+                    f"completion={e.get('completion_tokens')} total={e.get('total_tokens')}\n"
+                )
+                msgs = e.get("messages") or []
+                if msgs:
+                    body = "\n".join(
+                        f"[{i}] {m.get('role','')} ({len(m.get('content',''))} 字):\n{m.get('content','')}"
+                        for i, m in enumerate(msgs)
+                    )
+                    lines.append("#### messages\n" + _fence("", body) + "\n")
+                if e.get("raw") is not None:
+                    lines.append("#### raw response\n" + _fence("", str(e["raw"])) + "\n")
+                if e.get("sanitized") is not None:
+                    lines.append("#### sanitized\n" + _fence("", str(e["sanitized"])) + "\n")
+            else:
+                fields = " ".join(f"{k}={v!r}" for k, v in e.items() if k != "kind")
+                lines.append(f"- **{e['kind']}**: {fields}\n")
+
+    all_events = [e for s in t.steps for e in s.events]
+    llm_count = sum(1 for e in all_events if e["kind"] == "llm_call")
+    emb_count = sum(1 for e in all_events if e["kind"] == "embedding")
+    total_tokens = sum((e.get("total_tokens") or 0) for e in all_events if e["kind"] == "llm_call")
+    lines.append(
+        f"---\n轮 {t.turn_number} 小结：LLM {llm_count} 次 / embed {emb_count} 次 / "
+        f"总 token {total_tokens or '?'} / 耗时 {total_elapsed_s:.1f}s\n"
+    )
+    return "\n".join(lines)
+
+
+def _write_markdown(t: Trace) -> Path:
+    _SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    md_path = _SESSIONS_DIR / f"{t.session_id}.md"
+    # 首轮写文件头
+    if not md_path.exists():
+        header = (
+            f"# Session {t.session_id} (agent={t.agent_id})\n"
+            f"开始于 {datetime.now().isoformat(timespec='seconds')}\n\n"
+        )
+        md_path.write_text(header, encoding="utf-8")
+    with md_path.open("a", encoding="utf-8") as f:
+        f.write(_render_markdown_turn(t))
+        f.write("\n")
+    return md_path
+
+
 @contextmanager
 def turn(agent_id: str, user_message: str, debug: bool = False) -> Iterator[Trace]:
     """包一整轮 chat()，进入时激活 trace，退出时结束并渲染。"""
@@ -163,7 +259,11 @@ def turn(agent_id: str, user_message: str, debug: bool = False) -> Iterator[Trac
     token = _current.set(t)
     try:
         yield t
-        _render_default(t)
+        if debug:
+            _render_debug_console(t)
+            _write_markdown(t)
+        else:
+            _render_default(t)
     finally:
         _current.reset(token)
 
