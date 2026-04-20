@@ -1,12 +1,14 @@
 import json
 import logging
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 
 import config
+from core import trace
 from core.llm_client import chat_completion, get_embedding
 from core.soul import get_soul_anchor
 from core.global_state import read_global_state
@@ -200,7 +202,9 @@ def retrieve(agent_id: str, query: str, mode: str = "dialogue",
     l2_patterns = "；".join(p["abstract_conclusion"] for p in l2_pattern_list) if l2_pattern_list else ""
 
     # 5. Query embedding
+    _t0 = time.monotonic()
     query_embedding = get_embedding(query)
+    trace.event("embedding_stage", dim=len(query_embedding), elapsed_ms=int((time.monotonic()-_t0)*1000))
 
     # 6. LanceDB 向量检索
     tbl = _get_table(agent_id)
@@ -217,8 +221,14 @@ def retrieve(agent_id: str, query: str, mode: str = "dialogue",
 
     # 排除会话内已推送事件
     vector_results = [r for r in raw_results if r.get("event_id") not in already_surfaced]
-    logger.info(f"retrieve agent_id={agent_id} mode={mode} "
-                f"vector_hits={len(raw_results)} after_dedup={len(vector_results)}")
+    trace.event(
+        "vector_search",
+        raw_hits=len(raw_results),
+        after_dedup=len(vector_results),
+        limit=_RETRIEVAL_TOP_K,
+        already_surfaced=len(already_surfaced),
+    )
+    logger.debug(f"retrieve vector_hits={len(raw_results)} after_dedup={len(vector_results)}")
 
     # 7. 图扩展：对 top5 调用 get_neighbors，补充候选池
     graph = MemoryGraph()
@@ -247,8 +257,16 @@ def retrieve(agent_id: str, query: str, mode: str = "dialogue",
         except Exception as e:
             logger.warning(f"retrieve graph expand failed for {eid[:8]}: {e}")
 
-    logger.info(f"retrieve candidate_pool={len(candidate_map)} "
-                f"(vector={len(vector_results)} + graph_expand={len(candidate_map)-len(vector_results)})")
+    neighbors_added = len(candidate_map) - len(vector_results)
+    trace.event(
+        "graph_expand",
+        top5_ids=top5_ids,
+        neighbors_added=neighbors_added,
+    )
+    logger.debug(
+        f"retrieve candidate_pool={len(candidate_map)} "
+        f"(vector={len(vector_results)} + graph_expand={neighbors_added})"
+    )
 
     # 8. 按 mode 权重评分，取 top 8
     weights = _MODE_WEIGHTS.get(mode, _MODE_WEIGHTS["dialogue"])
@@ -268,15 +286,30 @@ def retrieve(agent_id: str, query: str, mode: str = "dialogue",
         })
     scored.sort(key=lambda x: x["score"], reverse=True)
     top_candidates = scored[:_FINAL_TOP_K]
+    trace.event(
+        "score_rerank",
+        weights=dict(weights),
+        candidate_pool=len(scored),
+        top_k_returned=len(top_candidates),
+        top_scored=[
+            {
+                "event_id": s["event_id"],
+                "score": round(s["score"], 3),
+                "source": s["source"],
+            }
+            for s in top_candidates
+        ],
+    )
 
     # 9. decision 模式 LLM 精排
     if mode == "decision" and top_candidates:
-        logger.info(f"retrieve decision mode: calling LLM rerank on {len(top_candidates)} candidates")
+        logger.debug(f"retrieve decision mode: calling LLM rerank on {len(top_candidates)} candidates")
         reranked_ids = _llm_rerank(query, top_candidates)
         id_to_item   = {c["event_id"]: c for c in top_candidates}
         reranked = [id_to_item[rid] for rid in reranked_ids if rid in id_to_item]
         if reranked:
             top_candidates = reranked
+            trace.event("llm_rerank", selected=len(reranked))
 
     # 10. 构建输出（含老化文本）
     relevant_memories = []
@@ -327,8 +360,8 @@ def retrieve(agent_id: str, query: str, mode: str = "dialogue",
         except Exception as e:
             logger.warning(f"retrieve strengthen_links failed: {e}")
 
-    logger.info(f"retrieve done agent_id={agent_id} mode={mode} "
-                f"returned={len(relevant_memories)} surfaced={len(surfaced_ids)}")
+    logger.debug(f"retrieve done agent_id={agent_id} mode={mode} "
+                 f"returned={len(relevant_memories)} surfaced={len(surfaced_ids)}")
 
     return {
         "soul_anchor":       soul_anchor,
