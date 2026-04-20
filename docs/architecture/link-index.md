@@ -8,12 +8,13 @@
 | # | 步骤 | 代码位置 | 副作用 |
 |---|------|----------|--------|
 | 1 | 情绪检测 | `_detect_emotion` L150 | LLM 1 次 |
-| 2 | 情绪峰值快照（若 >EMOTION_SNAPSHOT_THRESHOLD） | L159–166 | 写 l0_buffer |
+| 2 | 情绪峰值快照（若 > EMOTION_SNAPSHOT_THRESHOLD） | L159–166 | 写 l0_buffer |
 | 3 | `retrieve()` 记忆检索 | L170 | 见下 |
-| 4 | 追加 user 消息到 l0_buffer | L181 | 写 l0_buffer |
-| 5 | 拼 system prompt（含 soul_anchor / current_state / l2_patterns / memories） | L184–210 | — |
-| 6 | LLM 生成回答 | L219 | LLM 1 次 |
-| 7 | 追加 assistant 消息到 l0_buffer | L226–228 | 写 l0_buffer |
+| 4 | 更新 session_surfaced + `trace.mark("记忆检索")` | L177–178 | — |
+| 5 | 追加 user 消息到 l0_buffer | L181 | 写 l0_buffer |
+| 6 | 拼 system prompt（含 soul_anchor / current_state / l2_patterns / memories） | L184–210 | — |
+| 7 | LLM 生成回答 | L219 | LLM 1 次 |
+| 8 | 追加 assistant 消息到 l0_buffer | L226–228 | 写 l0_buffer |
 
 ## 2. retrieve() 流程（core/retrieval.py:167）
 
@@ -40,7 +41,7 @@
 - 清空 l0_buffer
 
 ### 异步后台（_end_session_async L279，独立线程）
-1. `update_elastic(emotion_core.current_emotional_state)` ← emotion snapshots max
+1. 根据 emotion_snapshots 的最大值派生状态标签（"情绪波动" / "轻微波动" / "平稳"），调用 `update_elastic(agent_id, "emotion_core", "current_emotional_state", <label>)` 写入 soul 的 elastic 区
 2. `soul_evidence_check` LLM（拿整段会话）
 3. 若是 evidence → `add_evidence`（写 soul.evidence_log，目前无上限）
 4. `check_slow_change` → 若触发 → LLM 生成新值 → `apply_slow_change`
@@ -76,5 +77,5 @@
 
 - 进入：`main_chat.py --debug` → `trace.turn(agent_id, user_input, debug=True)`
 - 阶段标记：`trace.mark("情绪检测")` / `trace.mark("记忆检索")` ...
-- 子事件：`trace.event("llm_call", ...)` / `trace.event("embedding", ...)`
+- 子事件：`trace.event("embedding", ...)` / `trace.event("vector_search", ...)` / `trace.event("graph_expand", ...)` / `trace.event("score_rerank", ...)` / `trace.event("llm_rerank", ...)` / `trace.event("llm_call", ...)` 等
 - 输出：`logs/sessions/<session_id>.md`
