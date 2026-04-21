@@ -63,14 +63,27 @@ def _l1_schema() -> pa.Schema:
 
 # ── LanceDB 连接 ───────────────────────────────────────────────────────────────
 
+def _migrate_schema(tbl: lancedb.table.Table) -> None:
+    """把旧 agent 表升级到最新 schema：缺列就补，老行填默认值。幂等。"""
+    existing = set(tbl.schema.names)
+    if "l2_pattern_ids" not in existing:
+        try:
+            tbl.add_columns({"l2_pattern_ids": "'[]'"})
+            logger.info("schema migrate: added l2_pattern_ids column")
+        except Exception as e:
+            logger.warning(f"schema migrate l2_pattern_ids failed: {e}")
+
+
 def _get_table(agent_id: str) -> lancedb.table.Table:
     db_path = _AGENTS_DIR / agent_id / "memories"
     db_path.mkdir(parents=True, exist_ok=True)
     db = lancedb.connect(str(db_path))
     try:
-        return db.open_table("l1_events")
+        tbl = db.open_table("l1_events")
     except Exception:
         return db.create_table("l1_events", schema=_l1_schema())
+    _migrate_schema(tbl)
+    return tbl
 
 
 # ── Prompt 工具 ───────────────────────────────────────────────────────────────
