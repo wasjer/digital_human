@@ -44,6 +44,82 @@ def test_benchmark_backup_restore_roundtrip(tmp_path, monkeypatch):
         assert any("soul.json" in n for n in names)
 
 
+def test_benchmark_copy_to_mode_copies_and_keeps(tmp_path, monkeypatch):
+    """--copy-to 模式：copytree(source → copy_to)，跑完不恢复，副本保留下来。"""
+    monkeypatch.setattr(br, "_AGENTS_DIR", tmp_path / "agents")
+    monkeypatch.setattr(br, "_BENCHMARK_DIR", tmp_path / "bench")
+    src_dir = br._AGENTS_DIR / "src_agent"
+    src_dir.mkdir(parents=True)
+    (src_dir / "soul.json").write_text('{"agent_id": "src_agent"}', encoding="utf-8")
+
+    dialogues = tmp_path / "d.json"
+    dialogues.write_text(json.dumps([{"text": "你好", "category": "寒暄"}]), encoding="utf-8")
+
+    # fake chat 写一个新文件到 test_agent 目录，模拟副本被修改
+    def fake_chat(agent_id, msg, history):
+        (br._AGENTS_DIR / agent_id / "touched.txt").write_text("modified", encoding="utf-8")
+        return {"reply": f"echo:{msg}", "emotion_intensity": 0.3}
+
+    with patch.object(br, "chat", side_effect=fake_chat), \
+         patch.object(br, "end_session", side_effect=_fake_end_session):
+        report = br.run_benchmark(
+            "src_agent", dialogues, run_label="t", copy_to="test_copy"
+        )
+
+    copy_dir = br._AGENTS_DIR / "test_copy"
+    # 副本存在
+    assert copy_dir.exists()
+    # 副本里有源文件
+    assert (copy_dir / "soul.json").read_text(encoding="utf-8") == '{"agent_id": "src_agent"}'
+    # 副本被修改了（chat 的副作用保留）
+    assert (copy_dir / "touched.txt").exists()
+    # 源 agent 没被 chat 的副作用污染
+    assert not (src_dir / "touched.txt").exists()
+    # 报告字段
+    assert report["copy_mode"] is True
+    assert report["test_agent"] == "test_copy"
+    assert report["backup_tar"] is None
+    assert report["kept_copy_dir"] == str(copy_dir)
+    assert report["ok_count"] == 1
+
+
+def test_benchmark_copy_to_overwrites_existing(tmp_path, monkeypatch):
+    """--copy-to 目标已存在时，先删除再拷贝（每次从干净副本开始）。"""
+    monkeypatch.setattr(br, "_AGENTS_DIR", tmp_path / "agents")
+    monkeypatch.setattr(br, "_BENCHMARK_DIR", tmp_path / "bench")
+    src_dir = br._AGENTS_DIR / "src_agent"
+    src_dir.mkdir(parents=True)
+    (src_dir / "soul.json").write_text('{"v": 2}', encoding="utf-8")
+
+    # 旧的 test_copy 存在且带脏文件
+    stale = br._AGENTS_DIR / "test_copy"
+    stale.mkdir(parents=True)
+    (stale / "stale.txt").write_text("old", encoding="utf-8")
+    (stale / "soul.json").write_text('{"v": 1}', encoding="utf-8")
+
+    dialogues = tmp_path / "d.json"
+    dialogues.write_text(json.dumps([]), encoding="utf-8")
+
+    with patch.object(br, "chat", side_effect=_fake_chat), \
+         patch.object(br, "end_session", side_effect=_fake_end_session):
+        br.run_benchmark("src_agent", dialogues, run_label="t", copy_to="test_copy")
+
+    # 脏文件不见了，soul.json 是源的版本
+    assert not (stale / "stale.txt").exists()
+    assert (stale / "soul.json").read_text(encoding="utf-8") == '{"v": 2}'
+
+
+def test_benchmark_copy_to_rejects_same_source_dest(tmp_path, monkeypatch):
+    monkeypatch.setattr(br, "_AGENTS_DIR", tmp_path / "agents")
+    monkeypatch.setattr(br, "_BENCHMARK_DIR", tmp_path / "bench")
+    (br._AGENTS_DIR / "same").mkdir(parents=True)
+    dialogues = tmp_path / "d.json"
+    dialogues.write_text(json.dumps([]), encoding="utf-8")
+    import pytest
+    with pytest.raises(ValueError, match="same"):
+        br.run_benchmark("same", dialogues, copy_to="same")
+
+
 def test_benchmark_restores_on_chat_exception(tmp_path, monkeypatch):
     """即使 chat() 抛异常，agent 目录也必须被恢复，错误被记录到 results 而不是吞掉。"""
     monkeypatch.setattr(br, "_AGENTS_DIR", tmp_path / "agents")
