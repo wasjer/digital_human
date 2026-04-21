@@ -54,7 +54,7 @@ def test_retrieve_emits_stage_events(
 
     vs = next(e for e in t.steps[0].events if e["kind"] == "vector_search")
     assert vs["raw_hits"] == 2
-    assert vs["after_dedup"] == 2
+    assert vs["limit"] == 20
 
     ge = next(e for e in t.steps[0].events if e["kind"] == "graph_expand")
     assert ge["neighbors_added"] >= 0

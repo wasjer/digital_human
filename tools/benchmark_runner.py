@@ -57,7 +57,6 @@ def run_benchmark(agent_id: str, dialogues_path: Path, run_label: str = "baselin
 
     results = []
     session_history: list = []
-    session_surfaced: set = set()
     t_start = time.time()
     started_at = datetime.now().isoformat()
 
@@ -65,7 +64,7 @@ def run_benchmark(agent_id: str, dialogues_path: Path, run_label: str = "baselin
         for i, q in enumerate(dialogues):
             t0 = time.monotonic()
             try:
-                r = chat(agent_id, q["text"], session_history, session_surfaced)
+                r = chat(agent_id, q["text"], session_history)
             except Exception as e:
                 logger.error(f"benchmark q{i} error: {e}")
                 results.append({
@@ -80,14 +79,12 @@ def run_benchmark(agent_id: str, dialogues_path: Path, run_label: str = "baselin
             elapsed = time.monotonic() - t0
             session_history.append({"role": "user", "content": q["text"]})
             session_history.append({"role": "assistant", "content": r["reply"]})
-            session_surfaced = r["session_surfaced"]
             results.append({
                 "index": i,
                 "category": q.get("category", ""),
                 "question": q["text"],
                 "reply": r["reply"],
                 "emotion_intensity": r["emotion_intensity"],
-                "surfaced_count": len(r["session_surfaced"]),
                 "elapsed_s": round(elapsed, 2),
             })
         try:

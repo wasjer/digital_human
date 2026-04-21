@@ -69,7 +69,7 @@ def test_events_between_marks_attach_to_next_step():
         trace.event("llm_call", provider="minimax", total_tokens=47)
         trace.mark("情绪检测")
         # 第二批
-        trace.event("vector_search", raw_hits=14, after_dedup=14)
+        trace.event("vector_search", raw_hits=14)
         trace.event("graph_expand", neighbors_added=3)
         trace.mark("记忆检索")
 
@@ -124,13 +124,13 @@ def test_render_default_step_line_shape():
 def test_render_auto_summary_for_retrieval_step():
     with trace.turn("a", "m") as t:
         trace.event("embedding", dim=1024)
-        trace.event("vector_search", raw_hits=14, after_dedup=14)
+        trace.event("vector_search", raw_hits=14)
         trace.event("graph_expand", neighbors_added=3)
         trace.event("score_rerank", top_k_returned=8)
         trace.mark("记忆检索")  # summary=None → 自动组装
     out = _render_to_string(t)
     step_line = [l for l in out.splitlines() if l.startswith("[1/4]")][0]
-    assert "向量 14" in step_line and "去重 14" in step_line
+    assert "向量 14" in step_line
     assert "图扩展 +3" in step_line and "top 8" in step_line
 
 
@@ -183,7 +183,7 @@ def test_debug_mode_console_shows_subitems(capsys, tmp_path, monkeypatch):
     monkeypatch.setattr(trace, "_SESSIONS_DIR", tmp_path)
     with trace.turn("a", "m", debug=True) as t:
         trace.event("embedding", dim=1024, elapsed_ms=900)
-        trace.event("vector_search", raw_hits=14, after_dedup=14, limit=20, elapsed_ms=230)
+        trace.event("vector_search", raw_hits=14, limit=20, elapsed_ms=230)
         trace.event("graph_expand", neighbors_added=3, top5_ids=["a", "b"])
         trace.event("score_rerank", top_k_returned=8,
                     weights={"relevance": 0.35, "importance": 0.20})

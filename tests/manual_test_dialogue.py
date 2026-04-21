@@ -37,7 +37,6 @@ print("2. 进行 5 轮对话（童年/工作压力/家庭关系）")
 print("=" * 60)
 
 session_history:  list = []
-session_surfaced: set  = None
 
 dialogues = [
     "你小时候最开心的记忆是什么？",
@@ -53,15 +52,12 @@ for i, user_msg in enumerate(dialogues, 1):
         AGENT_ID,
         user_msg,
         session_history=session_history,
-        session_surfaced=session_surfaced,
     )
-    reply            = result["reply"]
-    session_surfaced = result["session_surfaced"]
-    emotion          = result["emotion_intensity"]
+    reply   = result["reply"]
+    emotion = result["emotion_intensity"]
 
     print(f"         reply: {reply[:100]}{'...' if len(reply) > 100 else ''}")
-    print(f"         emotion_intensity={emotion:.3f}  "
-          f"surfaced_total={len(session_surfaced)}")
+    print(f"         emotion_intensity={emotion:.3f}")
 
     # 更新 session_history
     session_history.append({"role": "user",      "content": user_msg})
@@ -127,7 +123,6 @@ print("6. 开始第二个会话，引用上一会话的记忆")
 print("=" * 60)
 
 session_history2: list = []
-session_surfaced2: set = None
 
 query2 = "你还记得我们刚才聊的那些事吗？比如工作压力和家庭的话题"
 print(f"  user: {query2}")
@@ -135,10 +130,8 @@ result2 = chat(
     AGENT_ID,
     query2,
     session_history=session_history2,
-    session_surfaced=session_surfaced2,
 )
 print(f"  reply: {result2['reply']}")
-print(f"  引用的记忆数: {len(result2['session_surfaced'])}")
 print("  （reply 中应能自然引用上一会话的内容）")
 
 # 清理

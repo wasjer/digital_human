@@ -54,29 +54,8 @@ for i, mem in enumerate(result1["relevant_memories"]):
     print(f"       importance={mem['importance']:.3f}  emotion={mem['emotion']}")
     print(f"       freshness_text: '{mem['freshness_text']}'")
 
-surfaced1 = set(result1["surfaced_ids"])
-print(f"\nsurfaced_ids（共 {len(surfaced1)} 条）: {[s[:8] for s in surfaced1]}")
-
-
-# ── 3. 第二次检索同一 query，传入 already_surfaced，确认不重复 ──────────────
-print("\n" + "=" * 60)
-print('3. 同 query 第二次检索，传入 already_surfaced 去重')
-print("=" * 60)
-
-result2 = retrieve(AGENT_ID, "工作压力", mode="dialogue", already_surfaced=surfaced1)
-
-overlap = surfaced1 & set(result2["surfaced_ids"])
-print(f"第一次 surfaced: {len(surfaced1)} 条")
-print(f"第二次 surfaced: {len(result2['surfaced_ids'])} 条")
-print(f"重叠 event_id 数（预期为0）: {len(overlap)}")
-if overlap:
-    print(f"  ✗ 有重叠: {[s[:8] for s in overlap]}")
-else:
-    print("  ✓ 无重叠，去重有效")
-
-print(f"\n第二次返回事件摘要:")
-for i, mem in enumerate(result2["relevant_memories"]):
-    print(f"  [{i+1}] {mem['event_id'][:8]}...  {mem['content'][:50]}...")
+print(f"\nsurfaced_ids（共 {len(result1['surfaced_ids'])} 条）: "
+      f"{[s[:8] for s in result1['surfaced_ids']]}")
 
 
 # ── 4. decision 模式检索：重要决定 ───────────────────────────────────────────

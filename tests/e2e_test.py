@@ -75,13 +75,11 @@ for i, msg in enumerate(messages_a, 1):
         lambda m=msg: chat(
             AGENT_ID, m,
             session_history=session_a_history,
-            session_surfaced=session_a_surfaced,
         ),
         f"chat A-{i}",
     )
     if result:
         reply            = result["reply"]
-        session_a_surfaced = result["session_surfaced"]
         emotion          = result["emotion_intensity"]
         print(f"         reply: {reply[:120]}{'...' if len(reply) > 120 else ''}")
         print(f"         emotion_intensity={emotion:.3f}")
@@ -121,7 +119,6 @@ print(f"  l0_buffer: {safe(_check_buf, 'check l0_buffer')}")
 section("Session B：童年记忆 / 人际关系（5 轮）")
 
 session_b_history:  list = []
-session_b_surfaced: set  = None
 
 messages_b = [
     "你小时候是什么样的孩子？",
@@ -137,13 +134,11 @@ for i, msg in enumerate(messages_b, 1):
         lambda m=msg: chat(
             AGENT_ID, m,
             session_history=session_b_history,
-            session_surfaced=session_b_surfaced,
         ),
         f"chat B-{i}",
     )
     if result:
         reply            = result["reply"]
-        session_b_surfaced = result["session_surfaced"]
         emotion          = result["emotion_intensity"]
         print(f"         reply: {reply[:120]}{'...' if len(reply) > 120 else ''}")
         print(f"         emotion_intensity={emotion:.3f}")
@@ -184,7 +179,6 @@ if not triggered:
 section("Session C：跨会话记忆验证（3 轮）")
 
 session_c_history:  list = []
-session_c_surfaced: set  = None
 
 messages_c = [
     "你还记得我们之前聊过什么吗？",
@@ -201,7 +195,6 @@ for i, msg in enumerate(messages_c, 1):
         lambda m=msg: retrieve(
             AGENT_ID, m,
             mode="dialogue",
-            already_surfaced=session_c_surfaced or set(),
         ),
         f"retrieve C-{i}",
     )
@@ -218,13 +211,11 @@ for i, msg in enumerate(messages_c, 1):
         lambda m=msg: chat(
             AGENT_ID, m,
             session_history=session_c_history,
-            session_surfaced=session_c_surfaced,
         ),
         f"chat C-{i}",
     )
     if result:
         reply            = result["reply"]
-        session_c_surfaced = result["session_surfaced"]
         emotion          = result["emotion_intensity"]
         print(f"         reply: {reply[:120]}{'...' if len(reply) > 120 else ''}")
         print(f"         emotion_intensity={emotion:.3f}")

@@ -186,17 +186,12 @@ def _smalltalk_reply(agent_id: str, user_message: str, kind: str,
 # ── chat() ────────────────────────────────────────────────────────────────────
 
 def chat(agent_id: str, user_message: str,
-         session_history: list,
-         session_surfaced: set = None) -> dict:
+         session_history: list) -> dict:
     """
     单轮对话。
     session_history: list[{"role": str, "content": str}]  已有对话历史（不含本轮）
-    session_surfaced: set[str]，会话内已推送事件，首轮传 None
-    返回：{"reply": str, "session_surfaced": set[str], "emotion_intensity": float}
+    返回：{"reply": str, "emotion_intensity": float}
     """
-    if session_surfaced is None:
-        session_surfaced = set()
-
     # ── 0. smalltalk 旁路 ──
     kind = _classify_smalltalk(user_message)
     if kind in ("smalltalk", "farewell"):
@@ -215,7 +210,6 @@ def chat(agent_id: str, user_message: str,
         _save_l0(agent_id, buf)
         return {
             "reply":             reply,
-            "session_surfaced":  session_surfaced,
             "emotion_intensity": 0.0,
         }
 
@@ -240,14 +234,7 @@ def chat(agent_id: str, user_message: str,
         logger.info(f"chat emotion_snapshot saved intensity={emotion_intensity:.3f}")
 
     # ── 3. 检索相关记忆 ────────────────────────────────────────────────────────
-    retrieval_result = retrieve(
-        agent_id, user_message,
-        mode="dialogue",
-        already_surfaced=session_surfaced,
-    )
-
-    # ── 4. 更新 session_surfaced ───────────────────────────────────────────────
-    session_surfaced = session_surfaced | set(retrieval_result["surfaced_ids"])
+    retrieval_result = retrieve(agent_id, user_message, mode="dialogue")
     trace.mark("记忆检索")
 
     # ── 5. 追加 user 消息到 l0_buffer ─────────────────────────────────────────
@@ -302,7 +289,6 @@ def chat(agent_id: str, user_message: str,
 
     return {
         "reply":             reply,
-        "session_surfaced":  session_surfaced,
         "emotion_intensity": emotion_intensity,
     }
 

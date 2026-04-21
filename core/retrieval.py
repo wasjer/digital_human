@@ -36,7 +36,6 @@ _RERANK_SYS, _RERANK_USR = _load_prompt("retrieval_rerank.txt")
 _RETRIEVAL_TOP_K     = 20   # 向量召回上限
 _GRAPH_EXPAND_TOP_N  = 5    # 图扩展取前 N 条做邻居查询
 _FINAL_TOP_K         = 8    # 最终返回上限
-_SURFACED_PENALTY    = 0.15 # already_surfaced 的软惩罚系数
 
 _MODE_WEIGHTS = {
     "dialogue":   {"relevance": 0.35, "importance": 0.20, "recency": 0.25, "mood_fit": 0.20},
@@ -101,8 +100,7 @@ def _freshness_text(days_elapsed: int, status: str) -> str:
 
 
 def _score_candidate(row: dict, query_embedding, stress_level: float,
-                     weights: dict, now: datetime,
-                     already_surfaced: set | None = None) -> tuple[float, int]:
+                     weights: dict, now: datetime) -> tuple[float, int]:
     vector = row.get("vector")
     relevance = _cosine_sim(query_embedding, vector) if vector else 0.0
 
@@ -125,9 +123,6 @@ def _score_candidate(row: dict, query_embedding, stress_level: float,
         + recency    * weights["recency"]
         + mood_fit   * weights["mood_fit"]
     )
-
-    if already_surfaced and row.get("event_id") in already_surfaced:
-        score = max(0.0, score - _SURFACED_PENALTY)
 
     return score, days_elapsed
 
@@ -168,17 +163,13 @@ def _llm_rerank(query: str, candidates: list) -> list[str]:
 
 # ── 主入口 ────────────────────────────────────────────────────────────────────
 
-def retrieve(agent_id: str, query: str, mode: str = "dialogue",
-             already_surfaced: set = None) -> dict:
+def retrieve(agent_id: str, query: str, mode: str = "dialogue") -> dict:
     """
-    已推送事件去重检索，组装完整 context。
+    检索并组装完整 context。
+    车轱辘话的抑制交给 LLM 通过 session_history 自然处理，retrieval 不做去重。
 
-    already_surfaced: set[str]，本次会话已推送的 event_id，传 None 时视为空集合
     mode: "dialogue" | "decision" | "reflection"
     """
-    if already_surfaced is None:
-        already_surfaced = set()
-
     # 1. Soul anchor
     try:
         soul_anchor = get_soul_anchor(agent_id)
@@ -223,16 +214,13 @@ def retrieve(agent_id: str, query: str, mode: str = "dialogue",
         logger.warning(f"retrieve vector search failed: {e}")
         raw_results = []
 
-    # 不再硬过滤 already_surfaced：改为 _score_candidate 里软惩罚，保持候选池宽度
     vector_results = raw_results
     trace.event(
         "vector_search",
         raw_hits=len(raw_results),
-        after_dedup=len(vector_results),   # 软惩罚后不再缩减，但保留字段便于对比
         limit=_RETRIEVAL_TOP_K,
-        already_surfaced=len(already_surfaced),
     )
-    logger.debug(f"retrieve vector_hits={len(raw_results)} after_dedup={len(vector_results)}")
+    logger.debug(f"retrieve vector_hits={len(raw_results)}")
 
     # 7. 图扩展：对 top5 调用 get_neighbors，补充候选池
     graph = MemoryGraph()
@@ -255,7 +243,6 @@ def retrieve(agent_id: str, query: str, mode: str = "dialogue",
                 nid = n["event_id"]
                 if nid in candidate_map:
                     continue
-                # 注意：already_surfaced 不再在此硬过滤
                 nrow = get_event(agent_id, nid)
                 if nrow and nrow.get("status") in ("active", "dormant"):
                     candidate_map[nid] = {"row": nrow, "source": "graph_expand"}
@@ -281,7 +268,6 @@ def retrieve(agent_id: str, query: str, mode: str = "dialogue",
     for eid, item in candidate_map.items():
         score, days_elapsed = _score_candidate(
             item["row"], query_embedding, stress_level, weights, now,
-            already_surfaced=already_surfaced,
         )
         scored.append({
             "event_id":    eid,

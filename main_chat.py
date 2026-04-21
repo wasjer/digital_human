@@ -42,7 +42,6 @@ def main():
     _recover_stale_buffer_if_any(args.agent_id)
 
     session_history = []
-    session_surfaced = set()
 
     def _on_sigint(signum, frame):
         print("\n[SIGINT] 收到中断，正在保存记忆...")
@@ -71,7 +70,7 @@ def main():
 
         try:
             with trace.turn(args.agent_id, user_input, debug=args.debug):
-                result = chat(args.agent_id, user_input, session_history, session_surfaced)
+                result = chat(args.agent_id, user_input, session_history)
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -79,7 +78,6 @@ def main():
             continue
 
         reply = result["reply"]
-        session_surfaced = result["session_surfaced"]
 
         session_history.append({"role": "user", "content": user_input})
         session_history.append({"role": "assistant", "content": reply})

@@ -96,7 +96,7 @@ def _auto_summary(step: Step) -> str:
         ge = next((e for e in step.events if e["kind"] == "graph_expand"), {})
         rr = next((e for e in step.events if e["kind"] == "score_rerank"), {})
         return (
-            f"向量 {vs.get('raw_hits', 0)} / 去重 {vs.get('after_dedup', 0)} / "
+            f"向量 {vs.get('raw_hits', 0)} / "
             f"图扩展 +{ge.get('neighbors_added', 0)} / 重排 top {rr.get('top_k_returned', 0)}"
         )
     return ""

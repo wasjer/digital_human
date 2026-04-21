@@ -7,8 +7,8 @@ from unittest.mock import patch
 import tools.benchmark_runner as br
 
 
-def _fake_chat(agent_id, msg, history, surfaced):
-    return {"reply": f"echo:{msg}", "session_surfaced": set(), "emotion_intensity": 0.3}
+def _fake_chat(agent_id, msg, history):
+    return {"reply": f"echo:{msg}", "emotion_intensity": 0.3}
 
 
 def _fake_end_session(agent_id, history):

@@ -23,7 +23,7 @@ def test_hardcoded_hello_bypasses_retrieve():
          patch("core.dialogue.chat_completion", return_value="你好呀"), \
          patch("core.dialogue._load_l0", return_value=dialogue._empty_l0("a1")), \
          patch("core.dialogue._save_l0"):
-        r = dialogue.chat("a1", "你好", [], set())
+        r = dialogue.chat("a1", "你好", [])
 
     assert retrieve_called["n"] == 0, "smalltalk 应跳过 retrieve"
     assert r["reply"]
@@ -41,6 +41,6 @@ def test_substantive_input_still_calls_retrieve():
          patch("core.dialogue._load_l0", return_value=dialogue._empty_l0("a1")), \
          patch("core.dialogue._save_l0"), \
          patch("core.dialogue._classify_smalltalk", return_value="substantive"):
-        dialogue.chat("a1", "我最近被工作压垮了，觉得一切都没意义", [], set())
+        dialogue.chat("a1", "我最近被工作压垮了，觉得一切都没意义", [])
 
     assert retrieve_called["n"] == 1
