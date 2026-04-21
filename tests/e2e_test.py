@@ -268,7 +268,7 @@ graph_stats = safe(lambda: MemoryGraph().get_graph_stats(AGENT_ID), "graph_stats
 if graph_stats:
     print(f"\n  memory_graph:")
     print(f"    total_edges={graph_stats['total_edges']}  "
-          f"active_edges={graph_stats['active_edges']}  "
+          f"strong_edges={graph_stats['strong_edges']}  "
           f"avg_strength={graph_stats['avg_strength']:.4f}")
 
 # L2 patterns 数量

@@ -25,15 +25,18 @@ CREATE TABLE IF NOT EXISTS memory_links (
     activation_count INTEGER DEFAULT 0,
     created_at TEXT NOT NULL,
     last_activated TEXT,
-    status TEXT DEFAULT 'active',
     strengthen_history TEXT DEFAULT '[]',
     UNIQUE(agent_id, source_event_id, target_event_id)
 );
 CREATE INDEX IF NOT EXISTS idx_links_source
-    ON memory_links(agent_id, source_event_id, status);
+    ON memory_links(agent_id, source_event_id);
 CREATE INDEX IF NOT EXISTS idx_links_target
-    ON memory_links(agent_id, target_event_id, status);
+    ON memory_links(agent_id, target_event_id);
 """
+
+# 边不再有 status 字段。strength 是唯一导航信号：
+# - 衰减到接近 0 自然就被各处的 strength 阈值过滤掉（"dormant" 效果）
+# - 两端事件 archived 后边不再被用到（没有调用方会以 archived 事件为起点查邻居，"frozen" 效果）
 
 
 def _db_path(agent_id: str) -> Path:
@@ -134,6 +137,7 @@ class MemoryGraph:
         threshold = config.GRAPH_BUILD_EDGE_SIMILARITY_THRESHOLD
 
         # 取最近 top_n 条 active 事件（排除刚写入的自身）
+        # 注意：事件侧仍有 status 字段，需要排除 archived；边侧不再有 status
         tbl = _get_table(agent_id)
         try:
             rows = (
@@ -171,8 +175,8 @@ class MemoryGraph:
                         """
                         INSERT OR IGNORE INTO memory_links
                         (link_id, agent_id, source_event_id, target_event_id,
-                         strength, activation_count, created_at, last_activated, status)
-                        VALUES (?, ?, ?, ?, ?, 0, ?, NULL, 'active')
+                         strength, activation_count, created_at, last_activated)
+                        VALUES (?, ?, ?, ?, ?, 0, ?, NULL)
                         """,
                         (link_id, agent_id, new_event_id, existing_id, sim, now_str),
                     )
@@ -250,8 +254,8 @@ class MemoryGraph:
                             INSERT OR IGNORE INTO memory_links
                             (link_id, agent_id, source_event_id, target_event_id,
                              strength, activation_count, created_at, last_activated,
-                             status, strengthen_history)
-                            VALUES (?, ?, ?, ?, ?, 1, ?, ?, 'active', ?)
+                             strengthen_history)
+                            VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
                             """,
                             (link_id, agent_id, src, tgt, min(1.0, increment),
                              now_str, now_str, json.dumps([now_str])),
@@ -272,7 +276,7 @@ class MemoryGraph:
         min_strength 受 introversion 调制：
           introversion > 0.6 → min_strength × 0.6（联想更远）
           introversion < 0.4 → min_strength × 1.4（只要强关联）
-        只返回 status=active 的边对应的邻居。
+        返回 strength >= min_strength 的邻居（strength 是唯一过滤信号）。
         返回：[{"event_id": str, "strength": float}, ...]
         """
         if min_strength is None:
@@ -299,7 +303,6 @@ class MemoryGraph:
                     strength
                 FROM memory_links
                 WHERE agent_id = ?
-                  AND status = 'active'
                   AND (source_event_id = ? OR target_event_id = ?)
                   AND strength >= ?
                 """,
@@ -351,7 +354,7 @@ class MemoryGraph:
                 if not event_id:
                     continue
 
-                # 找该事件的 active 邻居
+                # 找该事件的邻居（strength 过滤，与 get_neighbors 口径一致）
                 neighbor_rows = conn.execute(
                     """
                     SELECT
@@ -359,10 +362,11 @@ class MemoryGraph:
                              ELSE source_event_id END AS neighbor_id
                     FROM memory_links
                     WHERE agent_id = ?
-                      AND status = 'active'
                       AND (source_event_id = ? OR target_event_id = ?)
+                      AND strength >= ?
                     """,
-                    (event_id, agent_id, event_id, event_id),
+                    (event_id, agent_id, event_id, event_id,
+                     config.GRAPH_RETRIEVAL_EXPAND_MIN_STRENGTH),
                 ).fetchall()
 
                 if not neighbor_rows:
@@ -407,114 +411,51 @@ class MemoryGraph:
         """
         边的 strength 每日衰减：
           strength = strength × GRAPH_EDGE_DECAY_RATE
-          strength < 0.05 → 改为 dormant（保留边，不删除）
-        返回：{"decayed": int, "dormanted": int}
+        衰减到接近 0 的边自然会被 get_neighbors 的 min_strength 过滤掉。
+        不再有状态切换、也不删除。
+        返回：{"decayed": int}
         """
         decay_rate = config.GRAPH_EDGE_DECAY_RATE
-        dormant_threshold = 0.05
 
         conn = _get_conn(agent_id)
         try:
-            rows = conn.execute(
-                "SELECT link_id, strength FROM memory_links "
-                "WHERE agent_id = ? AND status = 'active'",
-                (agent_id,),
-            ).fetchall()
-
-            decayed = 0
-            dormanted = 0
-            for row in rows:
-                new_strength = row["strength"] * decay_rate
-                if new_strength < dormant_threshold:
-                    conn.execute(
-                        "UPDATE memory_links SET strength = ?, status = 'dormant' "
-                        "WHERE link_id = ?",
-                        (new_strength, row["link_id"]),
-                    )
-                    dormanted += 1
-                else:
-                    conn.execute(
-                        "UPDATE memory_links SET strength = ? WHERE link_id = ?",
-                        (new_strength, row["link_id"]),
-                    )
-                    decayed += 1
+            cur = conn.execute(
+                "UPDATE memory_links SET strength = strength * ? WHERE agent_id = ?",
+                (decay_rate, agent_id),
+            )
+            decayed = cur.rowcount
             conn.commit()
         finally:
             conn.close()
 
-        logger.info(f"decay_edges agent_id={agent_id} decayed={decayed} dormanted={dormanted}")
-        return {"decayed": decayed, "dormanted": dormanted}
-
-    def update_frozen_edges(self, agent_id: str) -> int:
-        """
-        检查所有 active 边，若两端事件都是 archived 状态
-        → 边的 status 改为 frozen。
-        返回冻结边数。
-        """
-        tbl = _get_table(agent_id)
-        conn = _get_conn(agent_id)
-        frozen = 0
-        try:
-            rows = conn.execute(
-                "SELECT link_id, source_event_id, target_event_id FROM memory_links "
-                "WHERE agent_id = ? AND status = 'active'",
-                (agent_id,),
-            ).fetchall()
-
-            for row in rows:
-                try:
-                    src_rows = tbl.search().where(
-                        f"event_id = '{row['source_event_id']}'"
-                    ).limit(1).to_list()
-                    tgt_rows = tbl.search().where(
-                        f"event_id = '{row['target_event_id']}'"
-                    ).limit(1).to_list()
-                except Exception:
-                    continue
-
-                src_status = src_rows[0].get("status", "") if src_rows else ""
-                tgt_status = tgt_rows[0].get("status", "") if tgt_rows else ""
-
-                if src_status == "archived" and tgt_status == "archived":
-                    conn.execute(
-                        "UPDATE memory_links SET status = 'frozen' WHERE link_id = ?",
-                        (row["link_id"],),
-                    )
-                    frozen += 1
-
-            conn.commit()
-        finally:
-            conn.close()
-
-        logger.info(f"update_frozen_edges agent_id={agent_id} frozen={frozen}")
-        return frozen
+        logger.info(f"decay_edges agent_id={agent_id} decayed={decayed}")
+        return {"decayed": decayed}
 
     def get_graph_stats(self, agent_id: str) -> dict:
         """
         返回图统计：
-        {"total_edges": int, "active_edges": int,
-         "frozen_edges": int, "avg_strength": float}
+        {"total_edges": int, "strong_edges": int, "avg_strength": float}
+        strong_edges = strength >= GRAPH_RETRIEVAL_EXPAND_MIN_STRENGTH 的边数
         """
+        threshold = config.GRAPH_RETRIEVAL_EXPAND_MIN_STRENGTH
         conn = _get_conn(agent_id)
         try:
             row = conn.execute(
                 """
                 SELECT
                     COUNT(*) AS total_edges,
-                    SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_edges,
-                    SUM(CASE WHEN status = 'frozen' THEN 1 ELSE 0 END) AS frozen_edges,
-                    AVG(CASE WHEN status = 'active' THEN strength ELSE NULL END) AS avg_strength
+                    SUM(CASE WHEN strength >= ? THEN 1 ELSE 0 END) AS strong_edges,
+                    AVG(strength) AS avg_strength
                 FROM memory_links
                 WHERE agent_id = ?
                 """,
-                (agent_id,),
+                (threshold, agent_id),
             ).fetchone()
         finally:
             conn.close()
 
         return {
             "total_edges": row["total_edges"] or 0,
-            "active_edges": row["active_edges"] or 0,
-            "frozen_edges": row["frozen_edges"] or 0,
+            "strong_edges": row["strong_edges"] or 0,
             "avg_strength": round(row["avg_strength"] or 0.0, 4),
         }

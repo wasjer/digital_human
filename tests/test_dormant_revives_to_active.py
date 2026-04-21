@@ -1,4 +1,5 @@
-"""dormant 事件满足条件后直接 revive 到 active，不再有 revived 状态。"""
+"""dormant 事件满足条件后直接 revive 到 active（节点状态机）。
+边不再有状态，邻居查询只按 strength 过滤。"""
 from unittest.mock import MagicMock, patch
 
 from core.memory_graph import MemoryGraph
@@ -38,8 +39,8 @@ def test_revival_uses_active_not_revived(tmp_path, monkeypatch):
     for i, nid in enumerate(["n1", "n2", "n3"]):
         conn.execute(
             "INSERT INTO memory_links (link_id, agent_id, source_event_id, target_event_id, "
-            "strength, activation_count, created_at, status) "
-            "VALUES (?, ?, ?, ?, 0.5, 1, '2026-04-01T00:00:00', 'active')",
+            "strength, activation_count, created_at) "
+            "VALUES (?, ?, ?, ?, 0.5, 1, '2026-04-01T00:00:00')",
             (f"l{i}", "a1", "d1", nid),
         )
     conn.commit()

@@ -12,8 +12,8 @@ def _iso(dt):
 def _insert_edge_with_history(conn, agent_id, link_id, history_timestamps):
     conn.execute(
         "INSERT INTO memory_links (link_id, agent_id, source_event_id, target_event_id, "
-        "strength, activation_count, created_at, status, strengthen_history) "
-        "VALUES (?, ?, ?, ?, 0.5, 0, ?, 'active', ?)",
+        "strength, activation_count, created_at, strengthen_history) "
+        "VALUES (?, ?, ?, ?, 0.5, 0, ?, ?)",
         (link_id, agent_id, "A", "B", _iso(datetime.now() - timedelta(days=50)),
          json.dumps(history_timestamps)),
     )

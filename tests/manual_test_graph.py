@@ -28,7 +28,7 @@ def query_edges_between(event_ids: list, label: str = ""):
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         f"""
-        SELECT source_event_id, target_event_id, strength, activation_count, status
+        SELECT source_event_id, target_event_id, strength, activation_count
         FROM memory_links
         WHERE agent_id = ?
           AND source_event_id IN ({placeholders})
@@ -43,7 +43,7 @@ def query_edges_between(event_ids: list, label: str = ""):
         print(f"{tag}（无边）")
     for r in rows:
         print(f"{tag}{r['source_event_id'][:8]}<->{r['target_event_id'][:8]}  "
-              f"strength={r['strength']:.4f}  activation_count={r['activation_count']}  status={r['status']}")
+              f"strength={r['strength']:.4f}  activation_count={r['activation_count']}")
     return rows
 
 
@@ -188,56 +188,18 @@ else:
     print("  无可用 similar_ids，跳过")
 
 
-# ── 5. decay_edges — 验证低强度边被删除 ──────────────────────────────────────
+# ── 5. decay_edges — 验证 strength 衰减 ──────────────────────────────────────
 print("\n" + "=" * 60)
-print("5. decay_edges — 低强度边删除验证")
+print("5. decay_edges — strength 每日衰减（所有边保留）")
 print("=" * 60)
-# 正确的临界值：strength 需满足 strength × decay_rate < 0.05
-# 0.05 × 0.99 = 0.0495 < 0.05 → 会被删除
-# 0.06 × 0.99 = 0.0594 > 0.05 → 不会被删除（之前用0.06是错的）
-test_strength = 0.05
-print(f"将某条边 strength 设为 {test_strength}（{test_strength} × {config.GRAPH_EDGE_DECAY_RATE} = "
-      f"{test_strength * config.GRAPH_EDGE_DECAY_RATE:.4f} < 0.05 → 预期删除）")
-
-conn = sqlite3.connect(str(DB_PATH))
-conn.row_factory = sqlite3.Row
-target_link = conn.execute(
-    "SELECT link_id, strength FROM memory_links WHERE agent_id = ? AND status = 'active' LIMIT 1",
-    (AGENT_ID,),
-).fetchone()
-conn.close()
-
-if target_link:
-    target_link_id = target_link["link_id"]
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.execute(
-        "UPDATE memory_links SET strength = ? WHERE link_id = ?",
-        (test_strength, target_link_id),
-    )
-    conn.commit()
-    conn.close()
-    print(f"已设置 link_id={target_link_id[:8]}...  strength={test_strength}")
-else:
-    target_link_id = None
-    print("  无 active 边，跳过")
 
 stats_before = graph.get_graph_stats(AGENT_ID)
-print(f"\ndecay_edges 前: total_edges={stats_before['total_edges']}  active_edges={stats_before['active_edges']}")
+print(f"\ndecay_edges 前: {stats_before}")
 
 decay_stats = graph.decay_edges(AGENT_ID)
-print(f"decay_edges 统计: decayed={decay_stats['decayed']}（衰减保留）  removed={decay_stats['removed']}（删除）")
+print(f"decay_edges 统计: decayed={decay_stats['decayed']}（所有边 strength × decay_rate）")
 
 stats_after = graph.get_graph_stats(AGENT_ID)
-print(f"decay_edges 后: total_edges={stats_after['total_edges']}  active_edges={stats_after['active_edges']}")
-print(f"total_edges 减少了: {stats_before['total_edges'] - stats_after['total_edges']} 条")
-
-if target_link_id:
-    conn = sqlite3.connect(str(DB_PATH))
-    gone = conn.execute(
-        "SELECT link_id FROM memory_links WHERE link_id = ?", (target_link_id,)
-    ).fetchone()
-    conn.close()
-    if gone is None:
-        print(f"\n✓ link_id={target_link_id[:8]}... 已从数据库删除（符合预期）")
-    else:
-        print(f"\n✗ link_id={target_link_id[:8]}... 仍存在（异常）")
+print(f"decay_edges 后: {stats_after}")
+print(f"total_edges 变化: {stats_before['total_edges']} → {stats_after['total_edges']}（预期不变）")
+print(f"avg_strength 变化: {stats_before['avg_strength']} → {stats_after['avg_strength']}（预期下降）")

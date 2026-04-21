@@ -95,12 +95,11 @@ def run_decay_job(agent_id: str) -> dict:
 
     logger.info(f"run_decay_job agent_id={agent_id} stats={stats}")
 
-    # 8-9. 记忆图：边衰减、冻结 archived 边、检查 dormant 复活
+    # 8-9. 记忆图：边衰减、检查 dormant 事件复活（边不再有状态）
     try:
         from core.memory_graph import MemoryGraph
         graph = MemoryGraph()
         graph.decay_edges(agent_id)
-        graph.update_frozen_edges(agent_id)
         revived = graph.check_dormant_revival(agent_id)
         if revived:
             logger.info(f"run_decay_job revived dormant events agent_id={agent_id} count={len(revived)}")
