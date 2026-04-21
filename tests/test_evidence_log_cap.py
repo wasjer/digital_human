@@ -33,3 +33,7 @@ def test_evidence_log_cap_at_50(tmp_path, monkeypatch):
     assert "r0" in archived_reasons
     assert "r4" in archived_reasons
     assert len(data) == 5
+    # 归档条目带 origin（便于审计）
+    for e in data:
+        assert e["core"] == "emotion_core"
+        assert e["field"] == "emotional_regulation_style"

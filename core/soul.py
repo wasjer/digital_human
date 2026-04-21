@@ -276,6 +276,8 @@ def add_evidence(agent_id: str, core: str, field: str, score: float,
         "session_id": session_id,
         "score_delta": score,
         "reason": reason,
+        "core": core,
+        "field": field,
     })
     if len(entry["evidence_log"]) > _EVIDENCE_LOG_MAX_ENTRIES:
         overflow = entry["evidence_log"][:-_EVIDENCE_LOG_MAX_ENTRIES]
