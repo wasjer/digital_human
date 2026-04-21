@@ -280,8 +280,16 @@ def _end_session_async(agent_id: str, session_text: str,
                        session_id: str, emotion_snaps: list):
     """
     异步后台部分：更新 soul 弹性区、证据检查、缓变区更新、L2。
-    内部任何异常均不向上抛出。
+    内部任何异常均不向上抛出（含 import 失败）。
     """
+    try:
+        _end_session_async_body(agent_id, session_text, session_id, emotion_snaps)
+    except Exception as e:
+        logger.error(f"_end_session_async top-level guard caught: {e}")
+
+
+def _end_session_async_body(agent_id: str, session_text: str,
+                            session_id: str, emotion_snaps: list):
     # ── 1. update_elastic：根据情绪快照推断当前情绪状态 ──────────────────────
     try:
         if emotion_snaps:
@@ -356,9 +364,12 @@ def _end_session_async(agent_id: str, session_text: str,
         logger.warning(f"_end_session_async check_slow_change failed: {e}")
 
     # ── 5. memory_l2 ─────────────────────────────────────────────────────────
-    from core.memory_l2 import check_and_generate_patterns, contribute_to_soul
-    check_and_generate_patterns(agent_id)
-    contribute_to_soul(agent_id)
+    try:
+        from core.memory_l2 import check_and_generate_patterns, contribute_to_soul
+        check_and_generate_patterns(agent_id)
+        contribute_to_soul(agent_id)
+    except Exception as e:
+        logger.warning(f"_end_session_async memory_l2 failed: {e}")
 
 
 def end_session(agent_id: str, session_history: list) -> None:
