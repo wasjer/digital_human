@@ -57,6 +57,7 @@ def _l1_schema() -> pa.Schema:
         pa.field("ttl_days",                   pa.int32()),
         pa.field("raw_quote",                  pa.utf8()),
         pa.field("event_kind",                 pa.utf8()),
+        pa.field("l2_pattern_ids",             pa.utf8()),
     ])
 
 
@@ -267,6 +268,7 @@ def write_event(agent_id: str, raw_text: str, source: str = "dialogue") -> list[
                 "ttl_days":                    365,
                 "raw_quote":                   str(ev.get("raw_quote") or ""),
                 "event_kind":                  str(ev.get("event_kind") or "biography"),
+                "l2_pattern_ids":              "[]",
             }
             tbl.add([row])
 
@@ -328,6 +330,50 @@ def get_archived_by_topic(agent_id: str, topic: str) -> list[dict]:
         .to_list()
     )
     return rows
+
+
+def mark_event_abstracted(agent_id: str, event_id: str, pattern_id: str) -> dict:
+    """事件被归纳进某个 L2 pattern：
+    - 将 pattern_id 追加到 l2_pattern_ids（去重）
+    - importance × L2_ABSTRACTED_IMPORTANCE_DECAY（保留小数）
+
+    返回更新后的 {"importance": float, "l2_pattern_ids": list[str]}。
+    事件不存在或已包含该 pattern_id 时跳过 importance 衰减。
+    """
+    row = get_event(agent_id, event_id)
+    if not row:
+        logger.warning(f"mark_event_abstracted event not found event_id={event_id}")
+        return {}
+
+    try:
+        existing = json.loads(row.get("l2_pattern_ids") or "[]")
+        if not isinstance(existing, list):
+            existing = []
+    except Exception:
+        existing = []
+
+    if pattern_id in existing:
+        return {
+            "importance": float(row.get("importance", 0.0)),
+            "l2_pattern_ids": existing,
+        }
+
+    existing.append(pattern_id)
+    new_importance = float(row.get("importance", 0.0)) * config.L2_ABSTRACTED_IMPORTANCE_DECAY
+
+    tbl = _get_table(agent_id)
+    tbl.update(
+        where=f"event_id = '{event_id}'",
+        values={
+            "l2_pattern_ids": json.dumps(existing, ensure_ascii=False),
+            "importance":     new_importance,
+        },
+    )
+    logger.info(
+        f"mark_event_abstracted agent_id={agent_id} event_id={event_id} "
+        f"pattern_id={pattern_id[:8]} importance={new_importance:.3f}"
+    )
+    return {"importance": new_importance, "l2_pattern_ids": existing}
 
 
 def get_recent_events_summary(agent_id: str, limit: int = 5) -> str:

@@ -48,7 +48,6 @@ def init_global_state(agent_id: str, personality_params: dict | None = None) -> 
         },
         "decay_config": _collect_config("DECAY_"),   # 从 config 同步的衰减参数
         "graph_config": _collect_config("GRAPH_"),   # 从 config 同步的记忆图参数
-        "last_l2_scan_at": None,   # L2 增量扫描游标
     }
     _write(agent_id, state)
     logger.info(f"init_global_state agent_id={agent_id}")

@@ -72,43 +72,8 @@ def _load_prompt() -> tuple[str, str]:
     return sys_prompt, usr_template
 
 
-def _read_last_scan_at(agent_id: str) -> str | None:
-    from core.global_state import read_global_state
-    try:
-        state = read_global_state(agent_id)
-        return state.get("last_l2_scan_at") or None
-    except Exception:
-        return None
-
-
-def _write_last_scan_at(agent_id: str, timestamp: str) -> None:
-    from core.global_state import update_global_state
-    try:
-        update_global_state(agent_id, "last_l2_scan_at", timestamp)
-    except Exception as e:
-        logger.warning(f"_write_last_scan_at failed agent_id={agent_id} error={e}")
-
-
-def _fetch_archived_events(agent_id: str) -> list[dict]:
-    """增量扫：仅取 created_at > last_l2_scan_at 的 archived 事件。
-    首次扫（无时间戳）时走全扫。"""
-    from core.memory_l1 import _get_table
-    try:
-        tbl = _get_table(agent_id)
-        last_at = _read_last_scan_at(agent_id)
-        if last_at:
-            where_clause = f"status = 'archived' AND created_at > '{last_at}'"
-        else:
-            where_clause = "status = 'archived'"
-        rows = tbl.search().where(where_clause).limit(9999).to_list()
-        return rows
-    except Exception as e:
-        logger.warning(f"_fetch_archived_events agent_id={agent_id} error={e}")
-        return []
-
-
 def _fetch_all_events(agent_id: str) -> list[dict]:
-    """从 LanceDB 取该 agent 所有事件（忽略 status），用于初始化时的 L2 归纳。"""
+    """从 LanceDB 取该 agent 所有事件（忽略 status），L2 抽象统一按 importance 权重累积。"""
     from core.memory_l1 import _get_table
     try:
         tbl  = _get_table(agent_id)
@@ -117,6 +82,14 @@ def _fetch_all_events(agent_id: str) -> list[dict]:
     except Exception as e:
         logger.warning(f"_fetch_all_events agent_id={agent_id} error={e}")
         return []
+
+
+def _event_pattern_ids(ev: dict) -> set:
+    try:
+        val = json.loads(ev.get("l2_pattern_ids") or "[]")
+        return set(val) if isinstance(val, list) else set()
+    except Exception:
+        return set()
 
 
 def _parse_topics(tags_topic_str: str) -> list[str]:
@@ -153,61 +126,85 @@ def check_and_generate_patterns(
     include_all_statuses: bool = False,
 ) -> list[str]:
     """
-    触发逻辑（规则引擎，不是 LLM 扫全部事件）：
+    基于 importance 累积的 L2 抽象触发：
     1. 快照当前 l2_patterns.json
-    2. 取事件（默认 archived；初始化通路传 include_all_statuses=True 囊括 active/dormant）
-    3. 按 tags_topic 分组
-    4. 对每个 topic，若事件数 >= L2_SAME_TOPIC_THRESHOLD，调用 LLM
-    5. 写回，返回本次新增或更新的 pattern_id 列表
+    2. 全量取事件（无 status 过滤、无游标）
+    3. 按 tags_topic 分桶。多 topic 事件进入每个桶，桶内排除已在本 topic 下
+       被抽象过的事件（即事件的 l2_pattern_ids 已经包含某个 source_topic 匹配的 pattern）
+    4. 对每个桶，若 sum(importance) >= 阈值则调 LLM
+       - 阈值：普通路径 L2_IMPORTANCE_SUM_THRESHOLD；种子初始化路径
+         （include_all_statuses=True）用更低的 L2_IMPORTANCE_SUM_THRESHOLD_SEED
+    5. LLM 优先更新现有 pattern；新建或更新后，对该桶内每个事件调
+       mark_event_abstracted(event_id, pattern_id)：追加 pattern_id 并
+       importance × L2_ABSTRACTED_IMPORTANCE_DECAY（0.5），便于继续参与其他 topic
+    6. 写回 l2_patterns.json
     """
     # 1. 快照
     last_known_good_state = copy.deepcopy(_read_patterns(agent_id))
 
-    # 2. 取事件
-    if include_all_statuses:
-        candidate_events = _fetch_all_events(agent_id)
-        reason = "all-statuses mode"
-    else:
-        candidate_events = _fetch_archived_events(agent_id)
-        reason = "archived-only mode"
+    # 2. 取事件（始终全量）
+    candidate_events = _fetch_all_events(agent_id)
     if not candidate_events:
-        logger.info(f"check_and_generate_patterns agent_id={agent_id} no events ({reason}), skip")
-        if not include_all_statuses:
-            _write_last_scan_at(agent_id, _now())
+        logger.info(f"check_and_generate_patterns agent_id={agent_id} no events, skip")
         return []
 
-    # 3. 按 topic 分组
+    threshold = (
+        config.L2_IMPORTANCE_SUM_THRESHOLD_SEED
+        if include_all_statuses
+        else config.L2_IMPORTANCE_SUM_THRESHOLD
+    )
+
+    patterns = copy.deepcopy(last_known_good_state)
+
+    # 3. 先建立 "该 topic 下已覆盖此事件" 的过滤索引
+    #    {topic: set(pattern_id, ...)}，仅 active pattern
+    topic_to_pids: dict[str, set] = {}
+    for p in patterns:
+        if p.get("status") != "active":
+            continue
+        t = p.get("source_topic") or ""
+        if t:
+            topic_to_pids.setdefault(t, set()).add(p["pattern_id"])
+
+    # 4. 按 topic 分桶（排除已在本 topic 下被抽象的事件）
     topic_events: dict[str, list[dict]] = {}
     for ev in candidate_events:
+        ev_pids = _event_pattern_ids(ev)
         for topic in _parse_topics(ev.get("tags_topic", "")):
+            covered = topic_to_pids.get(topic, set())
+            if ev_pids & covered:
+                continue
             topic_events.setdefault(topic, []).append(ev)
 
-    # 4. 加载 prompt 模板
+    # 5. 加载 prompt 模板
     sys_prompt, usr_template = _load_prompt()
 
-    patterns    = copy.deepcopy(last_known_good_state)
     updated_ids: list[str] = []
     now = _now()
 
     for topic, events in topic_events.items():
-        if len(events) < config.L2_SAME_TOPIC_THRESHOLD:
+        total_importance = sum(float(ev.get("importance", 0.0)) for ev in events)
+        if total_importance < threshold:
             continue
 
-        # 检查该 topic 是否已有 active pattern
-        existing = [
-            p for p in patterns
-            if p.get("source_topic") == topic and p.get("status") == "active"
-        ]
-        if existing:
+        # 所有 active patterns 都作为候选（跨 topic 合并），引导 LLM 优先 update
+        active_patterns = [p for p in patterns if p.get("status") == "active"]
+        if active_patterns:
             existing_pattern_str = json.dumps(
-                [{"pattern_id": p["pattern_id"], "abstract_conclusion": p["abstract_conclusion"]}
-                 for p in existing],
+                [
+                    {
+                        "pattern_id":          p["pattern_id"],
+                        "source_topic":        p.get("source_topic", ""),
+                        "abstract_conclusion": p["abstract_conclusion"],
+                    }
+                    for p in active_patterns
+                ],
                 ensure_ascii=False,
             )
         else:
             existing_pattern_str = "无"
 
-        event_ids     = [ev.get("event_id", "") for ev in events if ev.get("event_id")]
+        event_ids      = [ev.get("event_id", "") for ev in events if ev.get("event_id")]
         events_summary = _events_to_summary(events)
 
         user_msg = usr_template.format(
@@ -217,7 +214,6 @@ def check_and_generate_patterns(
             existing_pattern= existing_pattern_str,
         )
 
-        # 调用 LLM
         try:
             raw    = chat_completion(
                 [{"role": "system", "content": sys_prompt},
@@ -231,19 +227,20 @@ def check_and_generate_patterns(
                 f"check_and_generate_patterns llm/parse failed "
                 f"agent_id={agent_id} topic={topic} error={e}"
             )
-            rollback_patterns(agent_id, last_known_good_state)
             mark_retry_needed(agent_id)
             continue
 
-        action = result.get("action", "skip")
+        action    = result.get("action", "skip")
+        abstracted_pid: str | None = None
 
         if action == "create":
             abstract    = result.get("abstract_conclusion", "").strip()
             target_core = result.get("target_core", "goal_core")
             if not abstract:
                 continue
+            abstracted_pid = str(uuid.uuid4())
             new_pattern = {
-                "pattern_id":          str(uuid.uuid4()),
+                "pattern_id":          abstracted_pid,
                 "agent_id":            agent_id,
                 "abstract_conclusion": abstract,
                 "support_event_ids":   event_ids,
@@ -258,10 +255,11 @@ def check_and_generate_patterns(
                 "sampling_weights_placeholder": dict(_SAMPLING_WEIGHTS_PLACEHOLDER),
             }
             patterns.append(new_pattern)
-            updated_ids.append(new_pattern["pattern_id"])
+            updated_ids.append(abstracted_pid)
             logger.info(
                 f"check_and_generate_patterns create pattern "
-                f"agent_id={agent_id} topic={topic} abstract={abstract[:40]}"
+                f"agent_id={agent_id} topic={topic} importance_sum={total_importance:.2f} "
+                f"abstract={abstract[:40]}"
             )
 
         elif action == "update":
@@ -279,10 +277,12 @@ def check_and_generate_patterns(
                     if eid not in existing_eids:
                         p.setdefault("support_event_ids", []).append(eid)
                         existing_eids.add(eid)
+                abstracted_pid = pid
                 updated_ids.append(pid)
                 logger.info(
                     f"check_and_generate_patterns update pattern "
-                    f"agent_id={agent_id} pattern_id={pid[:8]} confidence={p['confidence']:.2f}"
+                    f"agent_id={agent_id} pattern_id={pid[:8]} importance_sum={total_importance:.2f} "
+                    f"confidence={p['confidence']:.2f}"
                 )
             else:
                 logger.warning(
@@ -290,14 +290,28 @@ def check_and_generate_patterns(
                 )
 
         else:  # skip
-            logger.info(f"check_and_generate_patterns skip topic={topic} agent_id={agent_id}")
+            logger.info(
+                f"check_and_generate_patterns skip topic={topic} "
+                f"importance_sum={total_importance:.2f} agent_id={agent_id}"
+            )
 
-    # 5. 写回
+        # 本桶内事件统一打标 + importance × 0.5
+        if abstracted_pid:
+            from core.memory_l1 import mark_event_abstracted
+            for eid in event_ids:
+                try:
+                    mark_event_abstracted(agent_id, eid, abstracted_pid)
+                except Exception as e:
+                    logger.warning(
+                        f"mark_event_abstracted failed agent_id={agent_id} "
+                        f"event_id={eid} pattern_id={abstracted_pid[:8]} error={e}"
+                    )
+
+    # 6. 写回
     _write_patterns(agent_id, patterns)
-    if not include_all_statuses:
-        _write_last_scan_at(agent_id, _now())
     logger.info(
-        f"check_and_generate_patterns done agent_id={agent_id} updated={len(updated_ids)}"
+        f"check_and_generate_patterns done agent_id={agent_id} "
+        f"threshold={threshold} updated={len(updated_ids)}"
     )
     return updated_ids
 
