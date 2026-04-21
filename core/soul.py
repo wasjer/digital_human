@@ -102,6 +102,27 @@ def _now() -> str:
     return datetime.now().isoformat()
 
 
+_EVIDENCE_LOG_MAX_ENTRIES = 50
+
+
+def _archive_path(agent_id: str) -> Path:
+    return _agent_dir(agent_id) / "evidence_archive.json"
+
+
+def _append_to_archive(agent_id: str, entries: list) -> None:
+    if not entries:
+        return
+    p = _archive_path(agent_id)
+    existing = []
+    if p.exists():
+        try:
+            existing = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            existing = []
+    existing.extend(entries)
+    p.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 # ── Soul 结构构建 ──────────────────────────────────────────────────────────────
 
 def _build_empty_soul(agent_id: str) -> dict:
@@ -256,6 +277,10 @@ def add_evidence(agent_id: str, core: str, field: str, score: float,
         "score_delta": score,
         "reason": reason,
     })
+    if len(entry["evidence_log"]) > _EVIDENCE_LOG_MAX_ENTRIES:
+        overflow = entry["evidence_log"][:-_EVIDENCE_LOG_MAX_ENTRIES]
+        entry["evidence_log"] = entry["evidence_log"][-_EVIDENCE_LOG_MAX_ENTRIES:]
+        _append_to_archive(agent_id, overflow)
     _write_soul(agent_id, soul)
     logger.info(f"add_evidence agent_id={agent_id} {core}.{field} score+={score}")
 
