@@ -29,13 +29,13 @@ def test_chat_produces_four_steps(
         "relevant_memories": [],
         "surfaced_ids": [],
     }
-    # 第一次调：情绪检测；第二次调：回复生成
-    mock_chat.side_effect = ["0.15", "好的"]
+    # 第一次调：smalltalk 分类；第二次调：情绪检测；第三次调：回复生成
+    mock_chat.side_effect = ["substantive", "0.15", "好的"]
 
     from core.dialogue import chat
 
-    with trace.turn("a", "你好") as t:
-        result = chat("a", "你好", session_history=[])
+    with trace.turn("a", "我最近工作很忙") as t:
+        result = chat("a", "我最近工作很忙", session_history=[])
 
     step_names = [s.name for s in t.steps]
     assert step_names == ["情绪检测", "记忆检索", "构造 prompt", "对话生成"]

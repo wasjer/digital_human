@@ -36,6 +36,7 @@ _EMOTION_SYS,  _EMOTION_USR  = _load_prompt("detect_emotion.txt")
 _EVIDENCE_SYS, _EVIDENCE_USR = _load_prompt("soul_evidence_check.txt")
 _DIALOGUE_TPL                = (_PROMPTS_DIR / "dialogue_system.txt").read_text(encoding="utf-8")
 _DECISION_TPL                = (_PROMPTS_DIR / "decision_system.txt").read_text(encoding="utf-8")
+_SMALLTALK_SYS, _SMALLTALK_USR = _load_prompt("smalltalk_detect.txt")
 
 # ── L0 buffer 工具 ────────────────────────────────────────────────────────────
 
@@ -132,6 +133,56 @@ def _format_memories_for_prompt(memories: list) -> str:
 def _now() -> str:
     return datetime.now().isoformat()
 
+_SMALLTALK_KEYWORDS = {"你好", "您好", "早", "早上好", "晚安", "嗨", "hi", "hello"}
+_FAREWELL_KEYWORDS  = {"再见", "拜拜", "下次", "先这样", "bye", "goodbye"}
+
+
+def _classify_smalltalk(user_message: str) -> str:
+    """返回 'smalltalk' / 'farewell' / 'substantive'。
+    硬编码关键词优先；否则 1 次 LLM 快判。"""
+    msg = user_message.strip().lower()
+    if not msg:
+        return "substantive"
+    if len(msg) <= 6:
+        for kw in _SMALLTALK_KEYWORDS:
+            if msg.startswith(kw) or msg == kw:
+                return "smalltalk"
+        for kw in _FAREWELL_KEYWORDS:
+            if msg.startswith(kw) or msg == kw:
+                return "farewell"
+    try:
+        raw = chat_completion(
+            [{"role": "system", "content": _SMALLTALK_SYS},
+             {"role": "user",   "content": _SMALLTALK_USR.format(user_message=user_message)}],
+            max_tokens=4,
+            temperature=0.0,
+        ).strip().lower()
+        if raw in ("smalltalk", "farewell", "substantive"):
+            return raw
+    except Exception as e:
+        logger.warning(f"_classify_smalltalk failed: {e}")
+    return "substantive"
+
+
+def _smalltalk_reply(agent_id: str, user_message: str, kind: str,
+                     session_history: list) -> str:
+    """不走 retrieve / soul_anchor，直接轻量 prompt 生成。"""
+    info = _get_agent_info(agent_id)
+    system = (
+        f"你是 {info['name']}。用户和你打招呼/告别，简短自然地回一句（1-2 句，口语化）。"
+        f"不要展开话题，不要反问太深。"
+    )
+    messages = [{"role": "system", "content": system}]
+    for msg in session_history[-4:]:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": user_message})
+    try:
+        return chat_completion(messages, max_tokens=80, temperature=0.6)
+    except Exception as e:
+        logger.warning(f"_smalltalk_reply fallback: {e}")
+        return "嗯。" if kind == "smalltalk" else "回头聊。"
+
+
 # ── chat() ────────────────────────────────────────────────────────────────────
 
 def chat(agent_id: str, user_message: str,
@@ -145,6 +196,28 @@ def chat(agent_id: str, user_message: str,
     """
     if session_surfaced is None:
         session_surfaced = set()
+
+    # ── 0. smalltalk 旁路 ──
+    kind = _classify_smalltalk(user_message)
+    if kind in ("smalltalk", "farewell"):
+        trace.mark("smalltalk_bypass", summary=kind)
+        buf = _load_l0(agent_id)
+        if not buf.get("session_id"):
+            buf["session_id"] = str(uuid.uuid4())
+            buf["created_at"] = _now()
+        buf["raw_dialogue"].append({"role": "user", "content": user_message})
+        _save_l0(agent_id, buf)
+
+        reply = _smalltalk_reply(agent_id, user_message, kind, session_history)
+
+        buf = _load_l0(agent_id)
+        buf["raw_dialogue"].append({"role": "assistant", "content": reply})
+        _save_l0(agent_id, buf)
+        return {
+            "reply":             reply,
+            "session_surfaced":  session_surfaced,
+            "emotion_intensity": 0.0,
+        }
 
     # ── 1. 情绪检测 ───────────────────────────────────────────────────────────
     emotion_intensity = _detect_emotion(user_message)

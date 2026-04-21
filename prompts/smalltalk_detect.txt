@@ -1,0 +1,11 @@
+你是一个文本分类器。判断输入是哪一类：
+- smalltalk：简单寒暄（你好/早/吃了吗/在忙啥/天气）
+- farewell：告别（再见/下次聊/晚安）
+- substantive：有实质内容的对话（问问题、表达情绪、描述事件、谈观点）
+
+只输出一个词：smalltalk / farewell / substantive。不要加任何其他文本。
+
+---
+
+输入：{user_message}
+分类：
