@@ -72,12 +72,35 @@ def _load_prompt() -> tuple[str, str]:
     return sys_prompt, usr_template
 
 
+def _read_last_scan_at(agent_id: str) -> str | None:
+    from core.global_state import read_global_state
+    try:
+        state = read_global_state(agent_id)
+        return state.get("last_l2_scan_at") or None
+    except Exception:
+        return None
+
+
+def _write_last_scan_at(agent_id: str, timestamp: str) -> None:
+    from core.global_state import update_global_state
+    try:
+        update_global_state(agent_id, "last_l2_scan_at", timestamp)
+    except Exception as e:
+        logger.warning(f"_write_last_scan_at failed agent_id={agent_id} error={e}")
+
+
 def _fetch_archived_events(agent_id: str) -> list[dict]:
-    """从 LanceDB 取所有 status='archived' 的事件。"""
+    """增量扫：仅取 created_at > last_l2_scan_at 的 archived 事件。
+    首次扫（无时间戳）时走全扫。"""
     from core.memory_l1 import _get_table
     try:
-        tbl  = _get_table(agent_id)
-        rows = tbl.search().where("status = 'archived'").limit(9999).to_list()
+        tbl = _get_table(agent_id)
+        last_at = _read_last_scan_at(agent_id)
+        if last_at:
+            where_clause = f"status = 'archived' AND created_at > '{last_at}'"
+        else:
+            where_clause = "status = 'archived'"
+        rows = tbl.search().where(where_clause).limit(9999).to_list()
         return rows
     except Exception as e:
         logger.warning(f"_fetch_archived_events agent_id={agent_id} error={e}")
@@ -149,6 +172,8 @@ def check_and_generate_patterns(
         reason = "archived-only mode"
     if not candidate_events:
         logger.info(f"check_and_generate_patterns agent_id={agent_id} no events ({reason}), skip")
+        if not include_all_statuses:
+            _write_last_scan_at(agent_id, _now())
         return []
 
     # 3. 按 topic 分组
@@ -269,6 +294,8 @@ def check_and_generate_patterns(
 
     # 5. 写回
     _write_patterns(agent_id, patterns)
+    if not include_all_statuses:
+        _write_last_scan_at(agent_id, _now())
     logger.info(
         f"check_and_generate_patterns done agent_id={agent_id} updated={len(updated_ids)}"
     )
