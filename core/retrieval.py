@@ -36,6 +36,7 @@ _RERANK_SYS, _RERANK_USR = _load_prompt("retrieval_rerank.txt")
 _RETRIEVAL_TOP_K     = 20   # 向量召回上限
 _GRAPH_EXPAND_TOP_N  = 5    # 图扩展取前 N 条做邻居查询
 _FINAL_TOP_K         = 8    # 最终返回上限
+_SURFACED_PENALTY    = 0.15 # already_surfaced 的软惩罚系数
 
 _MODE_WEIGHTS = {
     "dialogue":   {"relevance": 0.35, "importance": 0.20, "recency": 0.25, "mood_fit": 0.20},
@@ -100,7 +101,8 @@ def _freshness_text(days_elapsed: int, status: str) -> str:
 
 
 def _score_candidate(row: dict, query_embedding, stress_level: float,
-                     weights: dict, now: datetime) -> tuple[float, int]:
+                     weights: dict, now: datetime,
+                     already_surfaced: set | None = None) -> tuple[float, int]:
     vector = row.get("vector")
     relevance = _cosine_sim(query_embedding, vector) if vector else 0.0
 
@@ -118,11 +120,15 @@ def _score_candidate(row: dict, query_embedding, stress_level: float,
     mood_fit = max(0.0, min(1.0, 1.0 - abs(emotion_intensity - stress_level)))
 
     score = (
-        relevance  * weights["relevance"]
+        relevance    * weights["relevance"]
         + importance * weights["importance"]
         + recency    * weights["recency"]
         + mood_fit   * weights["mood_fit"]
     )
+
+    if already_surfaced and row.get("event_id") in already_surfaced:
+        score = max(0.0, score - _SURFACED_PENALTY)
+
     return score, days_elapsed
 
 
@@ -217,12 +223,12 @@ def retrieve(agent_id: str, query: str, mode: str = "dialogue",
         logger.warning(f"retrieve vector search failed: {e}")
         raw_results = []
 
-    # 排除会话内已推送事件
-    vector_results = [r for r in raw_results if r.get("event_id") not in already_surfaced]
+    # 不再硬过滤 already_surfaced：改为 _score_candidate 里软惩罚，保持候选池宽度
+    vector_results = raw_results
     trace.event(
         "vector_search",
         raw_hits=len(raw_results),
-        after_dedup=len(vector_results),
+        after_dedup=len(vector_results),   # 软惩罚后不再缩减，但保留字段便于对比
         limit=_RETRIEVAL_TOP_K,
         already_surfaced=len(already_surfaced),
     )
@@ -247,8 +253,9 @@ def retrieve(agent_id: str, query: str, mode: str = "dialogue",
             neighbors = graph.get_neighbors(agent_id, eid)
             for n in neighbors:
                 nid = n["event_id"]
-                if nid in candidate_map or nid in already_surfaced:
+                if nid in candidate_map:
                     continue
+                # 注意：already_surfaced 不再在此硬过滤
                 nrow = get_event(agent_id, nid)
                 if nrow and nrow.get("status") in ("active", "dormant"):
                     candidate_map[nid] = {"row": nrow, "source": "graph_expand"}
@@ -273,7 +280,8 @@ def retrieve(agent_id: str, query: str, mode: str = "dialogue",
     scored = []
     for eid, item in candidate_map.items():
         score, days_elapsed = _score_candidate(
-            item["row"], query_embedding, stress_level, weights, now
+            item["row"], query_embedding, stress_level, weights, now,
+            already_surfaced=already_surfaced,
         )
         scored.append({
             "event_id":    eid,
