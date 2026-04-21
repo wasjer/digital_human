@@ -95,8 +95,6 @@ def _freshness_text(days_elapsed: int, status: str) -> str:
 
     if status == "dormant":
         base += "（这段记忆已经很模糊了）"
-    elif status == "revived":
-        base += "（这段记忆因相关联想被重新想起）"
 
     return base
 
@@ -211,7 +209,7 @@ def retrieve(agent_id: str, query: str, mode: str = "dialogue",
     try:
         raw_results = (
             tbl.search(query_embedding)
-            .where("status = 'active' OR status = 'dormant' OR status = 'revived'")
+            .where("status = 'active' OR status = 'dormant'")
             .limit(_RETRIEVAL_TOP_K)
             .to_list()
         )
@@ -252,7 +250,7 @@ def retrieve(agent_id: str, query: str, mode: str = "dialogue",
                 if nid in candidate_map or nid in already_surfaced:
                     continue
                 nrow = get_event(agent_id, nid)
-                if nrow and nrow.get("status") in ("active", "dormant", "revived"):
+                if nrow and nrow.get("status") in ("active", "dormant"):
                     candidate_map[nid] = {"row": nrow, "source": "graph_expand"}
         except Exception as e:
             logger.warning(f"retrieve graph expand failed for {eid[:8]}: {e}")

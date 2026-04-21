@@ -297,7 +297,7 @@ def get_event(agent_id: str, event_id: str) -> dict:
 
 
 def update_event_status(agent_id: str, event_id: str, status: str) -> None:
-    """更新事件状态字段（active / dormant / revived / archived）。"""
+    """更新事件状态字段（active / dormant / archived）。"""
     tbl = _get_table(agent_id)
     tbl.update(where=f"event_id = '{event_id}'", values={"status": status})
     logger.info(f"update_event_status agent_id={agent_id} event_id={event_id} status={status}")

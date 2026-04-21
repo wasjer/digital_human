@@ -373,10 +373,9 @@ effective_rate = base_decay_rate ^ (1 - importance × damping_factor)
 new_decay_score = decay_score × effective_rate ^ days_elapsed
 ```
 
-**status四态（v6新增revived）：**
+**status 三态：**
 - `active`：正常参与检索
 - `dormant`：decay_score < 0.3，降权参与检索，可被记忆图复活
-- `revived`：从dormant恢复，decay_score重置为0.4，标记来源（v6新增）
 - `archived`：decay_score < 0.1，不参与普通检索，供L2规则引擎聚类
 
 ---
@@ -439,7 +438,7 @@ CREATE INDEX idx_links_target ON memory_links(agent_id, target_event_id, status)
   if active邻居数 >= K（默认3，graph_config.dormant_revival_neighbor_count）:
     检查这些邻居近7天的access_count是否 > 0
     if 有访问的active邻居 >= K:
-      → status从dormant改为revived
+      → status 从 dormant 直接恢复为 active
       → decay_score重置为 dormant_threshold + 0.1（默认0.4）
       → 日志记录复活原因和触发邻居
 ```
@@ -470,7 +469,7 @@ class MemoryGraph:
 - 写入语义相似的事件后，自动建边
 - 不相似的事件之间不建边
 - 多次共同被检索的事件，边的strength递增
-- dormant事件满足复活条件后status变为revived
+- dormant事件满足复活条件后status变为 active
 - 边的strength随时间衰减，低于阈值的边被清理
 
 ---
@@ -547,7 +546,7 @@ def run_decay_job(agent_id) -> dict:
     # 5. [v6] 执行边的strength衰减（memory_graph.decay_edges）
     # 6. [v6] 检查dormant复活（memory_graph.check_dormant_revival）
     # 7. [v6] 更新边的status（两端都archived → frozen）
-    # 返回统计：{active, dormant, revived, newly_archived, edges_decayed, edges_removed, revived_events}
+    # 返回统计：{active, dormant, newly_archived, edges_decayed, edges_removed, revived_events}
 ```
 
 ---
@@ -864,8 +863,6 @@ CREATE TABLE skill_memory (
   
   if event.status == "dormant":
     老化文本 += "（这段记忆已经很模糊了）"
-  elif event.status == "revived":
-    老化文本 += "（这段记忆因相关联想被重新想起）"
 
 context中的事件格式：
   "{event_content} {老化文本}"
@@ -1166,7 +1163,7 @@ query + agent_id + mode + session_surfaced_ids
   ↓ L0 buffer → 当前会话上下文
   ↓ get_patterns_for_retrieval() → L2相关摘要（有内容时加入）
   ↓ query→embedding → LanceDB向量检索
-  ↓ 过滤status=active OR dormant OR revived，召回top20
+  ↓ 过滤 status=active OR dormant，召回 top20
   ↓ [v6] 排除already_surfaced事件（会话内去重）
   ↓ [v6] 图扩展：对top5事件查memory_graph邻居
   ↓   expand_min_strength受introversion调制：

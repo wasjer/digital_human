@@ -246,11 +246,11 @@ class MemoryGraph:
         """
         检查 dormant 事件是否满足复活条件：
           active 邻居数 >= GRAPH_DORMANT_REVIVAL_NEIGHBOR_COUNT
-          且这些邻居的 access_count > 0
+          且这些邻居的 access_count > 0，created_at 在近 7 天内
         满足条件：
-          → 调用 memory_l1.update_event_status 改为 revived
-          → 调用 memory_l1 更新 decay_score 为 DORMANT_THRESHOLD + 0.1
-        返回复活的 event_id 列表。
+          → 调用 memory_l1.update_event_status 改为 active（从 dormant 直接恢复）
+          → 更新 decay_score 为 DORMANT_THRESHOLD + 0.1
+        返回被复活的 event_id 列表。
         """
         neighbor_count_required = config.GRAPH_DORMANT_REVIVAL_NEIGHBOR_COUNT
         recent_days = config.GRAPH_DORMANT_REVIVAL_RECENT_DAYS
@@ -317,7 +317,7 @@ class MemoryGraph:
 
                 if qualifying >= neighbor_count_required:
                     try:
-                        update_event_status(agent_id, event_id, "revived")
+                        update_event_status(agent_id, event_id, "active")
                         tbl.update(
                             where=f"event_id = '{event_id}'",
                             values={"decay_score": float(revive_decay)},
