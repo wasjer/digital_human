@@ -1,3 +1,4 @@
+import json
 import logging
 import sqlite3
 import uuid
@@ -25,6 +26,7 @@ CREATE TABLE IF NOT EXISTS memory_links (
     created_at TEXT NOT NULL,
     last_activated TEXT,
     status TEXT DEFAULT 'active',
+    strengthen_history TEXT DEFAULT '[]',
     UNIQUE(agent_id, source_event_id, target_event_id)
 );
 CREATE INDEX IF NOT EXISTS idx_links_source
@@ -40,10 +42,67 @@ def _db_path(agent_id: str) -> Path:
     return d / "graph.db"
 
 
+_COOLDOWN_LIMITS = [
+    ("24h", timedelta(hours=24), 3),
+    ("7d",  timedelta(days=7),   10),
+    ("30d", timedelta(days=30),  20),
+]
+
+
+def _ensure_strengthen_history_column(conn: sqlite3.Connection) -> None:
+    """SQLite 不支持 ADD COLUMN IF NOT EXISTS，用 try/except 实现幂等。"""
+    try:
+        conn.execute(
+            "ALTER TABLE memory_links ADD COLUMN strengthen_history TEXT DEFAULT '[]'"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
+def _is_on_cooldown(history_json: str, now: datetime) -> bool:
+    try:
+        timestamps = json.loads(history_json or "[]")
+    except Exception:
+        return False
+    if not timestamps:
+        return False
+    parsed = []
+    for ts in timestamps:
+        try:
+            parsed.append(datetime.fromisoformat(ts))
+        except Exception:
+            continue
+    for label, delta, cap in _COOLDOWN_LIMITS:
+        cutoff = now - delta
+        count = sum(1 for t in parsed if t >= cutoff)
+        if count >= cap:
+            return True
+    return False
+
+
+def _prune_strengthen_history(history_json: str, now: datetime) -> list[str]:
+    """只保留最近 30 天的时间戳，避免无限增长。"""
+    try:
+        timestamps = json.loads(history_json or "[]")
+    except Exception:
+        return []
+    cutoff = now - timedelta(days=30)
+    kept = []
+    for ts in timestamps:
+        try:
+            if datetime.fromisoformat(ts) >= cutoff:
+                kept.append(ts)
+        except Exception:
+            continue
+    return kept
+
+
 def _get_conn(agent_id: str) -> sqlite3.Connection:
     conn = sqlite3.connect(str(_db_path(agent_id)))
     conn.row_factory = sqlite3.Row
     conn.executescript(_CREATE_TABLE_SQL)
+    _ensure_strengthen_history_column(conn)
     conn.commit()
     return conn
 
@@ -133,12 +192,9 @@ class MemoryGraph:
 
     def strengthen_links_on_retrieval(self, agent_id: str, retrieved_event_ids: list) -> int:
         """
-        检索时加强共现边。
-        retrieved_event_ids 两两之间：
-          已有边 → strength += increment，activation_count += 1
-          无边   → 建新边，strength = increment
-        strength 上限 1.0。
-        返回更新边数。
+        共现边加强，含冷却：
+          同一条边在 24h/7d/30d 内达到次数上限时跳过本轮增强。
+        strength 上限 1.0，单次增量 config.GRAPH_RETRIEVAL_STRENGTHEN_INCREMENT。
         """
         increment = config.GRAPH_RETRIEVAL_STRENGTHEN_INCREMENT
         ids = list(retrieved_event_ids)
@@ -146,16 +202,17 @@ class MemoryGraph:
             return 0
 
         updated = 0
-        now_str = _now()
+        now = datetime.now()
+        now_str = now.isoformat()
         conn = _get_conn(agent_id)
         try:
             for i in range(len(ids)):
                 for j in range(i + 1, len(ids)):
                     src, tgt = ids[i], ids[j]
-                    # Check both directions
                     row = conn.execute(
                         """
-                        SELECT link_id, strength, activation_count FROM memory_links
+                        SELECT link_id, strength, activation_count, strengthen_history
+                        FROM memory_links
                         WHERE agent_id = ?
                           AND ((source_event_id = ? AND target_event_id = ?)
                             OR (source_event_id = ? AND target_event_id = ?))
@@ -165,15 +222,25 @@ class MemoryGraph:
                     ).fetchone()
 
                     if row:
+                        history_json = row["strengthen_history"] or "[]"
+                        if _is_on_cooldown(history_json, now):
+                            logger.debug(
+                                f"strengthen_links cooldown hit link_id={row['link_id']}"
+                            )
+                            continue
+                        pruned = _prune_strengthen_history(history_json, now)
+                        pruned.append(now_str)
                         new_strength = min(1.0, row["strength"] + increment)
                         conn.execute(
                             """
                             UPDATE memory_links
-                            SET strength = ?, activation_count = activation_count + 1,
-                                last_activated = ?
+                            SET strength = ?,
+                                activation_count = activation_count + 1,
+                                last_activated = ?,
+                                strengthen_history = ?
                             WHERE link_id = ?
                             """,
-                            (new_strength, now_str, row["link_id"]),
+                            (new_strength, now_str, json.dumps(pruned), row["link_id"]),
                         )
                         updated += 1
                     else:
@@ -182,14 +249,15 @@ class MemoryGraph:
                             """
                             INSERT OR IGNORE INTO memory_links
                             (link_id, agent_id, source_event_id, target_event_id,
-                             strength, activation_count, created_at, last_activated, status)
-                            VALUES (?, ?, ?, ?, ?, 1, ?, ?, 'active')
+                             strength, activation_count, created_at, last_activated,
+                             status, strengthen_history)
+                            VALUES (?, ?, ?, ?, ?, 1, ?, ?, 'active', ?)
                             """,
-                            (link_id, agent_id, src, tgt, min(1.0, increment), now_str, now_str),
+                            (link_id, agent_id, src, tgt, min(1.0, increment),
+                             now_str, now_str, json.dumps([now_str])),
                         )
                         if conn.execute("SELECT changes()").fetchone()[0] > 0:
                             updated += 1
-
             conn.commit()
         finally:
             conn.close()
