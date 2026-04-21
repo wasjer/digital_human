@@ -431,10 +431,11 @@ def _end_session_async_body(agent_id: str, session_text: str,
         logger.warning(f"_end_session_async memory_l2 failed: {e}")
 
 
-def end_session(agent_id: str, session_history: list) -> None:
+def end_session(agent_id: str, session_history: list, wait_async: bool = False) -> None:
     """
     结束会话：同步写入 L1 + 清空 l0_buffer，后台异步更新 soul。
-    立即返回，不等待异步完成。
+    默认立即返回，不等待异步完成。wait_async=True 时阻塞到异步完成
+    （benchmark/离线任务用，避免主进程退出时 daemon 线程被 kill）。
     """
     session_text, session_id, emotion_snaps = _end_session_sync(agent_id, session_history)
 
@@ -445,6 +446,10 @@ def end_session(agent_id: str, session_history: list) -> None:
     )
     t.start()
     logger.info(f"end_session async thread started agent_id={agent_id}")
+
+    if wait_async:
+        t.join()
+        logger.info(f"end_session async thread joined agent_id={agent_id}")
 
 
 # ── make_decision() ───────────────────────────────────────────────────────────

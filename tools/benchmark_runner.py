@@ -129,7 +129,9 @@ def run_benchmark(
                 "elapsed_s": round(elapsed, 2),
             })
         try:
-            end_session(test_agent, session_history)
+            # wait_async=True：benchmark 里必须等 L2 / soul_update 走完再退主进程，
+            # 否则 daemon 异步线程会被 kill，l2_patterns 不会更新。
+            end_session(test_agent, session_history, wait_async=True)
         except Exception as e:
             logger.warning(f"benchmark end_session error (non-fatal): {e}")
     finally:
