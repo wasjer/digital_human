@@ -339,39 +339,43 @@ class MemoryGraph:
         """
         边的 strength 每日衰减：
           strength = strength × GRAPH_EDGE_DECAY_RATE
-          strength < 0.05 → 删除该边
-        返回：{"decayed": int, "removed": int}
+          strength < 0.05 → 改为 dormant（保留边，不删除）
+        返回：{"decayed": int, "dormanted": int}
         """
         decay_rate = config.GRAPH_EDGE_DECAY_RATE
-        remove_threshold = 0.05
+        dormant_threshold = 0.05
 
         conn = _get_conn(agent_id)
         try:
             rows = conn.execute(
-                "SELECT link_id, strength FROM memory_links WHERE agent_id = ? AND status = 'active'",
+                "SELECT link_id, strength FROM memory_links "
+                "WHERE agent_id = ? AND status = 'active'",
                 (agent_id,),
             ).fetchall()
 
             decayed = 0
-            removed = 0
+            dormanted = 0
             for row in rows:
                 new_strength = row["strength"] * decay_rate
-                if new_strength < remove_threshold:
-                    conn.execute("DELETE FROM memory_links WHERE link_id = ?", (row["link_id"],))
-                    removed += 1
+                if new_strength < dormant_threshold:
+                    conn.execute(
+                        "UPDATE memory_links SET strength = ?, status = 'dormant' "
+                        "WHERE link_id = ?",
+                        (new_strength, row["link_id"]),
+                    )
+                    dormanted += 1
                 else:
                     conn.execute(
                         "UPDATE memory_links SET strength = ? WHERE link_id = ?",
                         (new_strength, row["link_id"]),
                     )
                     decayed += 1
-
             conn.commit()
         finally:
             conn.close()
 
-        logger.info(f"decay_edges agent_id={agent_id} decayed={decayed} removed={removed}")
-        return {"decayed": decayed, "removed": removed}
+        logger.info(f"decay_edges agent_id={agent_id} decayed={decayed} dormanted={dormanted}")
+        return {"decayed": decayed, "dormanted": dormanted}
 
     def update_frozen_edges(self, agent_id: str) -> int:
         """
